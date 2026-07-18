@@ -8,7 +8,12 @@ account_id = "ef3d5ed4216ab2dd7c64dd679ce0b2cd"
 CF_PAGES = "1"
 WORKER_RUNTIME = "cloudflare"
 DISABLE_CAPTCHA = "1"
-DB_ADAPTER = "postgres"
+DB_ADAPTER = "d1"
 
 [python]
 pyproject = "./pyproject.toml"
+
+[[d1_databases]]
+binding = "DB"
+database_name = "jizhanggaunlixitong"
+database_id = "39e7a7c7-f45f-4164-b127-5012551ce74e"

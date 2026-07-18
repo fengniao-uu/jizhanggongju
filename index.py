@@ -9,14 +9,31 @@ if BACKEND_DIR not in sys.path:
     sys.path.insert(0, BACKEND_DIR)
 
 _flask_app = None
+_d1_initialized = False
 
 
-def _init_flask_app():
+def _init_d1_from_env(env):
+    global _d1_initialized
+    if _d1_initialized:
+        return
+    try:
+        db_binding = getattr(env, "DB", None)
+        if db_binding is not None:
+            from db.d1_adapter import set_d1_db
+            set_d1_db(db_binding)
+            _d1_initialized = True
+    except Exception as e:
+        print(f"[d1 init error] {e}", file=sys.stderr)
+
+
+def _init_flask_app(env=None):
     global _flask_app
     if _flask_app is not None:
         return _flask_app
     
     try:
+        if env is not None:
+            _init_d1_from_env(env)
         from app import app as flask_app
         _flask_app = flask_app
         return flask_app
@@ -26,7 +43,7 @@ def _init_flask_app():
         raise
 
 
-async def _handle_request(request):
+async def _handle_request(request, env=None):
     url = getattr(request, "url", "")
     path = str(url).split("?")[0] if url else "/"
     query = str(url).split("?")[1] if "?" in str(url) else ""
@@ -51,7 +68,7 @@ async def _handle_request(request):
         pass
     
     try:
-        app = _init_flask_app()
+        app = _init_flask_app(env)
         
         from io import BytesIO
         
@@ -134,8 +151,8 @@ async def _handle_request(request):
 from workers import WorkerEntrypoint, Response
 
 class Default(WorkerEntrypoint):
-    async def fetch(self, request):
-        result = await _handle_request(request)
+    async def fetch(self, request, env=None, ctx=None):
+        result = await _handle_request(request, env=env)
         headers_dict = {}
         for k, v in (result.get("headers") or {}).items():
             headers_dict[str(k)] = str(v)

@@ -106,7 +106,10 @@ def get_adapter() -> DatabaseAdapter:
             _h.setFormatter(_lg.Formatter("[%(asctime)s] %(levelname)s | %(message)s", "%Y-%m-%d %H:%M:%S"))
             _logger.addHandler(_h)
             _logger.setLevel(_lg.INFO)
-        if config.DB_ADAPTER == "supabase":
+        if config.DB_ADAPTER == "d1":
+            from .d1_adapter import D1Adapter
+            _adapter_singleton = D1Adapter()
+        elif config.DB_ADAPTER == "supabase":
             try:
                 from .supabase_adapter import SupabaseAdapter
                 _adapter_singleton = SupabaseAdapter()
