@@ -11,4 +11,4 @@ DISABLE_CAPTCHA = "1"
 DB_ADAPTER = "postgres"
 
 [python]
-requirements = "./requirements.txt"
+pyproject = "./pyproject.toml"
