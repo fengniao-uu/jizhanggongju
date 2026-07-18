@@ -114,12 +114,18 @@ def get_d1_db():
 
 class D1Adapter(DatabaseAdapter):
     def __init__(self):
-        self._db = get_d1_db()
+        self._db = None
         self._init_schema_done = False
-        self.init_schema()
+
+    def _get_db(self):
+        if self._db is None:
+            self._db = get_d1_db()
+            if not self._init_schema_done:
+                self.init_schema()
+        return self._db
 
     def _execute(self, sql, params=None):
-        db = get_d1_db()
+        db = self._get_db()
         args = params or []
         try:
             stmt = db.prepare(sql)
