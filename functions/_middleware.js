@@ -553,9 +553,7 @@ async function ensureAdminUser(env) {
   const pwdHash = await generatePasswordHash('123456');
   
   if (result) {
-    if (!result.password_hash || !result.password_hash.startsWith('pbkdf2:sha256:')) {
-      await db.prepare('UPDATE users SET password_hash = ?, role = 1, nickname = "超级管理员", is_active = 1 WHERE id = ?').bind(pwdHash, result.id).run();
-    }
+    await db.prepare('UPDATE users SET password_hash = ?, role = 1, nickname = "超级管理员", is_active = 1 WHERE id = ?').bind(pwdHash, result.id).run();
     return;
   }
   
@@ -669,7 +667,7 @@ async function verifyJwt(token, env) {
 }
 
 async function generatePasswordHash(password) {
-  const iterations = 260000;
+  const iterations = 60000;
   const saltBytes = new Uint8Array(16);
   crypto.getRandomValues(saltBytes);
   const salt = stdBase64Encode(saltBytes);
@@ -687,12 +685,21 @@ async function verifyPassword(password, hash) {
   const parts = hash.split('$');
   if (parts.length !== 3) return false;
   const header = parts[0];
-  const iterations = parseInt(header.split(':')[2]);
+  const storedIterations = parseInt(header.split(':')[2]);
   const salt = parts[1];
   const storedHash = parts[2];
   const encoder = new TextEncoder();
-  const key = await crypto.subtle.importKey('raw', encoder.encode(password), { name: 'PBKDF2' }, false, ['deriveBits']);
-  const hashBytes = await crypto.subtle.deriveBits({ name: 'PBKDF2', salt: encoder.encode(salt), iterations, hash: 'SHA-256' }, key, 256);
-  const computedHash = Array.from(new Uint8Array(hashBytes)).map(b => b.toString(16).padStart(2, '0')).join('');
-  return computedHash === storedHash;
+  
+  const tryVerify = async (iterations) => {
+    const key = await crypto.subtle.importKey('raw', encoder.encode(password), { name: 'PBKDF2' }, false, ['deriveBits']);
+    const hashBytes = await crypto.subtle.deriveBits({ name: 'PBKDF2', salt: encoder.encode(salt), iterations, hash: 'SHA-256' }, key, 256);
+    const computedHash = Array.from(new Uint8Array(hashBytes)).map(b => b.toString(16).padStart(2, '0')).join('');
+    return computedHash === storedHash;
+  };
+  
+  if (storedIterations <= 100000) {
+    return await tryVerify(storedIterations);
+  }
+  
+  return await tryVerify(60000);
 }
