@@ -40,7 +40,12 @@ async function handleApiRequest(request, env, path) {
     return jsonResponse(500, '数据库未配置');
   }
   
-  await initDb(env);
+  try {
+    await initDb(env);
+  } catch (dbErr) {
+    console.error('Database init error:', dbErr);
+    return jsonResponse(500, '数据库初始化失败');
+  }
   
   if (path === '/api/auth/login' && method === 'POST') {
     const body = await request.json();

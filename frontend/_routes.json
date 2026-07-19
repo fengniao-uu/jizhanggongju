@@ -1,7 +1,12 @@
 {
   "version": 1,
+  "error_pages": {},
   "include": [
-    "/*"
+    {
+      "pattern": "/*",
+      "serve": "/index.html",
+      "cache": true
+    }
   ],
   "exclude": [
     "/api/*"
