@@ -79,7 +79,9 @@ async function api(path, opts = {}) {
   const mergedOpts = Object.assign({ credentials: "omit" }, opts, { headers });
   const LOCAL_FALLBACK = "http://127.0.0.1:5000";
   const tryBases = [API_BASE];
-  if (API_BASE !== LOCAL_FALLBACK) tryBases.push(LOCAL_FALLBACK);
+  if (_isLocalHostname() && API_BASE !== LOCAL_FALLBACK) {
+    tryBases.push(LOCAL_FALLBACK);
+  }
   const failCodes = [];
   for (let i = 0; i < tryBases.length; i++) {
     const base = tryBases[i];

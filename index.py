@@ -6,9 +6,14 @@ BACKEND_DIR = os.path.join(ROOT, "backend")
 if BACKEND_DIR not in sys.path:
     sys.path.insert(0, BACKEND_DIR)
 
-for k in ("CF_PAGES", "CF_WORKER", "CLOUDFLARE_WORKER", "CF_PAGES_COMMIT_SHA", "WORKER_RUNTIME"):
-    if k in os.environ:
-        del os.environ[k]
+IS_CF = any(
+    k in os.environ for k in ("CF_PAGES", "CF_WORKER", "CLOUDFLARE_WORKER", "CF_PAGES_COMMIT_SHA")
+) or os.environ.get("WORKER_RUNTIME", "") == "cloudflare"
+
+if not IS_CF:
+    for k in ("CF_PAGES", "CF_WORKER", "CLOUDFLARE_WORKER", "CF_PAGES_COMMIT_SHA", "WORKER_RUNTIME"):
+        if k in os.environ:
+            del os.environ[k]
 
 from app import app
 

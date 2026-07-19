@@ -10,152 +10,15 @@ export async function onRequest(context) {
   return null;
 }
 
-async function initDb(env) {
-  const DB_SCHEMA = `
-    CREATE TABLE IF NOT EXISTS users (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
-      account_no CHAR(6) NOT NULL UNIQUE,
-      password_hash VARCHAR(255) NOT NULL,
-      created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-      last_login_at TIMESTAMP,
-      is_deleted BOOLEAN NOT NULL DEFAULT 0,
-      failed_attempts INTEGER NOT NULL DEFAULT 0,
-      last_failed_at TIMESTAMP,
-      locked_until TIMESTAMP,
-      nickname VARCHAR(32) NOT NULL DEFAULT '',
-      phone VARCHAR(20) NOT NULL DEFAULT '',
-      is_active BOOLEAN NOT NULL DEFAULT 1,
-      role INTEGER NOT NULL DEFAULT 0
-    );
-
-    CREATE TABLE IF NOT EXISTS categories (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
-      user_id INTEGER NOT NULL,
-      type CHAR(4) NOT NULL CHECK(type IN ('收入','支出')),
-      name VARCHAR(20) NOT NULL,
-      is_system BOOLEAN NOT NULL DEFAULT 0,
-      sort INTEGER NOT NULL DEFAULT 0,
-      disabled BOOLEAN NOT NULL DEFAULT 0,
-      UNIQUE(user_id, type, name)
-    );
-
-    CREATE TABLE IF NOT EXISTS transactions (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
-      user_id INTEGER NOT NULL,
-      type CHAR(4) NOT NULL CHECK(type IN ('收入','支出')),
-      category VARCHAR(20) NOT NULL,
-      amount DECIMAL(12,2) NOT NULL CHECK(amount > 0),
-      description VARCHAR(200) NOT NULL DEFAULT '',
-      room_no VARCHAR(20) NOT NULL DEFAULT '',
-      trans_date DATE NOT NULL,
-      tag VARCHAR(50) NOT NULL DEFAULT '',
-      created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-      updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-      deleted BOOLEAN NOT NULL DEFAULT 0
-    );
-
-    CREATE TABLE IF NOT EXISTS reminders (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
-      user_id INTEGER NOT NULL,
-      room_no VARCHAR(20) NOT NULL,
-      rent_amount DECIMAL(12,2) NOT NULL CHECK(rent_amount >= 0),
-      due_date DATE NOT NULL,
-      lease_end_date DATE,
-      status VARCHAR(10) NOT NULL DEFAULT '未完成' CHECK(status IN ('未完成','已完成','已确认')),
-      remark VARCHAR(200) NOT NULL DEFAULT '',
-      created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-      updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-      deleted BOOLEAN NOT NULL DEFAULT 0
-    );
-
-    CREATE TABLE IF NOT EXISTS captchas (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
-      captcha_id VARCHAR(64) NOT NULL UNIQUE,
-      code VARCHAR(8) NOT NULL,
-      created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-      expires_at TIMESTAMP NOT NULL
-    );
-
-    CREATE TABLE IF NOT EXISTS announcements (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
-      title VARCHAR(80) NOT NULL,
-      content TEXT NOT NULL,
-      banner_level VARCHAR(10) NOT NULL DEFAULT 'info',
-      priority INTEGER NOT NULL DEFAULT 0,
-      is_pinned BOOLEAN NOT NULL DEFAULT 0,
-      is_active BOOLEAN NOT NULL DEFAULT 1,
-      effective_at TIMESTAMP,
-      expire_at TIMESTAMP,
-      created_by INTEGER,
-      updated_by INTEGER,
-      created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-      updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-      is_deleted BOOLEAN NOT NULL DEFAULT 0
-    );
-  `;
-  
-  const db = env.DB;
-  const statements = DB_SCHEMA.split(';').filter(s => s.trim());
-  
-  for (const stmt of statements) {
-    try {
-      await db.prepare(stmt.trim()).run();
-    } catch (e) {
-      console.warn('Init schema error:', e.message);
-    }
-  }
-  
-  await ensureAdminUser(env);
-}
-
-async function ensureAdminUser(env) {
-  const db = env.DB;
-  const result = await db.prepare('SELECT id FROM users WHERE account_no = ? AND is_deleted = 0 LIMIT 1').bind('100000').first();
-  
-  if (result) return;
-  
-  const pwdHash = await generatePasswordHash('123456');
-  await db.prepare(`
-    INSERT INTO users(account_no, password_hash, role, nickname, is_active) 
-    VALUES(?, ?, 1, '超级管理员', 1)
-  `).bind('100000', pwdHash).run();
-  
-  const admin = await db.prepare('SELECT id FROM users WHERE account_no = ? LIMIT 1').bind('100000').first();
-  const adminId = admin.id;
-  
-  const SYSTEM_CATEGORIES = {
-    '收入': ['房租', '网费', '取暖费', '房租押金', '门禁卡押金', '违约金', '其他'],
-    '支出': ['网费', '招租费', '配件', '工人费', '保洁费', '水电', '维修', '其他']
-  };
-  
-  for (const [type, names] of Object.entries(SYSTEM_CATEGORIES)) {
-    for (let i = 0; i < names.length; i++) {
-      try {
-        await db.prepare(`
-          INSERT OR IGNORE INTO categories(user_id, type, name, is_system, sort)
-          VALUES(?, ?, ?, 1, ?)
-        `).bind(adminId, type, names[i], i).run();
-      } catch (e) {}
-    }
-  }
-}
+const CAPTCHA_STORE = new Map();
 
 async function handleApiRequest(request, env, path) {
   const method = request.method;
-  const hasDb = env && env.DB;
   
   if (path === '/api/auth/captcha' && method === 'GET') {
     try {
       const { captcha_id, code, svg } = generateCaptcha();
-      if (hasDb) {
-        const expiresAt = new Date(Date.now() + 5 * 60 * 1000).toISOString();
-        try {
-          await env.DB.prepare('INSERT INTO captchas(captcha_id, code, expires_at) VALUES(?, ?, ?)')
-            .bind(captcha_id, code, expiresAt).run();
-        } catch (dbErr) {
-          console.warn('Captcha DB insert warning:', dbErr.message);
-        }
-      }
+      CAPTCHA_STORE.set(captcha_id, { code, expiresAt: Date.now() + 5 * 60 * 1000 });
       return new Response(JSON.stringify({ code: 0, msg: 'ok', data: { captcha_id, image: svg, ttl: 300, length: 4 } }), {
         headers: { 'Content-Type': 'application/json; charset=utf-8' }
       });
@@ -165,25 +28,17 @@ async function handleApiRequest(request, env, path) {
     }
   }
   
+  if (path === '/api/system/health' && method === 'GET') {
+    return jsonResponse(0, 'ok', { status: 'running' });
+  }
+  
+  const hasDb = env && env.DB;
+  
   if (!hasDb) {
     return jsonResponse(500, '数据库未配置');
   }
   
-  try {
-    await initDb(env);
-  } catch (e) {
-    console.error('DB init error:', e);
-    return jsonResponse(500, '数据库初始化失败');
-  }
-  
-  if (path === '/api/system/health') {
-    try {
-      await env.DB.prepare('SELECT 1').first();
-      return jsonResponse(0, 'ok', { status: 'running' });
-    } catch (e) {
-      return jsonResponse(500, '数据库连接失败');
-    }
-  }
+  await initDb(env);
   
   if (path === '/api/auth/login' && method === 'POST') {
     try {
@@ -194,19 +49,18 @@ async function handleApiRequest(request, env, path) {
         return jsonResponse(400, '账号或密码不能为空');
       }
       
-      const captcha = await env.DB.prepare('SELECT * FROM captchas WHERE captcha_id = ? AND expires_at > datetime("now") LIMIT 1')
-        .bind(captcha_id).first();
-      
-      if (!captcha) {
+      const captcha = CAPTCHA_STORE.get(captcha_id);
+      if (!captcha || captcha.expiresAt < Date.now()) {
+        CAPTCHA_STORE.delete(captcha_id);
         return jsonResponse(400, '验证码已过期，请刷新重试');
       }
       
       if (captcha.code.toLowerCase() !== captcha_code.toLowerCase()) {
-        await env.DB.prepare('DELETE FROM captchas WHERE captcha_id = ?').bind(captcha_id).run();
+        CAPTCHA_STORE.delete(captcha_id);
         return jsonResponse(400, '验证码错误');
       }
       
-      await env.DB.prepare('DELETE FROM captchas WHERE captcha_id = ?').bind(captcha_id).run();
+      CAPTCHA_STORE.delete(captcha_id);
       
       const user = await env.DB.prepare('SELECT * FROM users WHERE account_no = ? AND is_deleted = 0 LIMIT 1')
         .bind(account_no).first();
@@ -228,7 +82,7 @@ async function handleApiRequest(request, env, path) {
       await env.DB.prepare('UPDATE users SET last_login_at = CURRENT_TIMESTAMP WHERE id = ?')
         .bind(user.id).run();
       
-      const token = generateJwt({ id: user.id, account_no: user.account_no, role: user.role }, env);
+      const token = await generateJwt({ id: user.id, account_no: user.account_no, role: user.role }, env);
       
       return jsonResponse(0, '登录成功', {
         token,
@@ -292,12 +146,12 @@ async function handleApiRequest(request, env, path) {
   }
   
   const token = getToken(request);
-  if (!token && path !== '/api/auth/login' && path !== '/api/auth/register' && path !== '/api/system/health') {
+  if (!token && path !== '/api/auth/login' && path !== '/api/auth/register') {
     return jsonResponse(401, '未登录');
   }
   
-  const decoded = token ? verifyJwt(token, env) : null;
-  if (!decoded && path !== '/api/auth/login' && path !== '/api/auth/register' && path !== '/api/system/health') {
+  const decoded = token ? await verifyJwt(token, env) : null;
+  if (!decoded && path !== '/api/auth/login' && path !== '/api/auth/register') {
     return jsonResponse(401, '登录已过期');
   }
   
@@ -685,6 +539,128 @@ async function handleApiRequest(request, env, path) {
   return jsonResponse(404, 'API 不存在');
 }
 
+async function initDb(env) {
+  const DB_SCHEMA = `
+    CREATE TABLE IF NOT EXISTS users (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      account_no CHAR(6) NOT NULL UNIQUE,
+      password_hash VARCHAR(255) NOT NULL,
+      created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+      last_login_at TIMESTAMP,
+      is_deleted BOOLEAN NOT NULL DEFAULT 0,
+      failed_attempts INTEGER NOT NULL DEFAULT 0,
+      last_failed_at TIMESTAMP,
+      locked_until TIMESTAMP,
+      nickname VARCHAR(32) NOT NULL DEFAULT '',
+      phone VARCHAR(20) NOT NULL DEFAULT '',
+      is_active BOOLEAN NOT NULL DEFAULT 1,
+      role INTEGER NOT NULL DEFAULT 0
+    );
+
+    CREATE TABLE IF NOT EXISTS categories (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      user_id INTEGER NOT NULL,
+      type CHAR(4) NOT NULL CHECK(type IN ('收入','支出')),
+      name VARCHAR(20) NOT NULL,
+      is_system BOOLEAN NOT NULL DEFAULT 0,
+      sort INTEGER NOT NULL DEFAULT 0,
+      disabled BOOLEAN NOT NULL DEFAULT 0,
+      UNIQUE(user_id, type, name)
+    );
+
+    CREATE TABLE IF NOT EXISTS transactions (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      user_id INTEGER NOT NULL,
+      type CHAR(4) NOT NULL CHECK(type IN ('收入','支出')),
+      category VARCHAR(20) NOT NULL,
+      amount DECIMAL(12,2) NOT NULL CHECK(amount > 0),
+      description VARCHAR(200) NOT NULL DEFAULT '',
+      room_no VARCHAR(20) NOT NULL DEFAULT '',
+      trans_date DATE NOT NULL,
+      tag VARCHAR(50) NOT NULL DEFAULT '',
+      created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+      updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+      deleted BOOLEAN NOT NULL DEFAULT 0
+    );
+
+    CREATE TABLE IF NOT EXISTS reminders (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      user_id INTEGER NOT NULL,
+      room_no VARCHAR(20) NOT NULL,
+      rent_amount DECIMAL(12,2) NOT NULL CHECK(rent_amount >= 0),
+      due_date DATE NOT NULL,
+      lease_end_date DATE,
+      status VARCHAR(10) NOT NULL DEFAULT '未完成' CHECK(status IN ('未完成','已完成','已确认')),
+      remark VARCHAR(200) NOT NULL DEFAULT '',
+      created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+      updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+      deleted BOOLEAN NOT NULL DEFAULT 0
+    );
+
+    CREATE TABLE IF NOT EXISTS announcements (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      title VARCHAR(80) NOT NULL,
+      content TEXT NOT NULL,
+      banner_level VARCHAR(10) NOT NULL DEFAULT 'info',
+      priority INTEGER NOT NULL DEFAULT 0,
+      is_pinned BOOLEAN NOT NULL DEFAULT 0,
+      is_active BOOLEAN NOT NULL DEFAULT 1,
+      effective_at TIMESTAMP,
+      expire_at TIMESTAMP,
+      created_by INTEGER,
+      updated_by INTEGER,
+      created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+      updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+      is_deleted BOOLEAN NOT NULL DEFAULT 0
+    );
+  `;
+  
+  const db = env.DB;
+  const statements = DB_SCHEMA.split(';').filter(s => s.trim());
+  
+  for (const stmt of statements) {
+    try {
+      await db.prepare(stmt.trim()).run();
+    } catch (e) {
+      console.warn('Init schema error:', e.message);
+    }
+  }
+  
+  await ensureAdminUser(env);
+}
+
+async function ensureAdminUser(env) {
+  const db = env.DB;
+  const result = await db.prepare('SELECT id FROM users WHERE account_no = ? AND is_deleted = 0 LIMIT 1').bind('100000').first();
+  
+  if (result) return;
+  
+  const pwdHash = await generatePasswordHash('123456');
+  await db.prepare(`
+    INSERT INTO users(account_no, password_hash, role, nickname, is_active) 
+    VALUES(?, ?, 1, '超级管理员', 1)
+  `).bind('100000', pwdHash).run();
+  
+  const admin = await db.prepare('SELECT id FROM users WHERE account_no = ? LIMIT 1').bind('100000').first();
+  const adminId = admin.id;
+  
+  const SYSTEM_CATEGORIES = {
+    '收入': ['房租', '网费', '取暖费', '房租押金', '门禁卡押金', '违约金', '其他'],
+    '支出': ['网费', '招租费', '配件', '工人费', '保洁费', '水电', '维修', '其他']
+  };
+  
+  for (const [type, names] of Object.entries(SYSTEM_CATEGORIES)) {
+    for (let i = 0; i < names.length; i++) {
+      try {
+        await db.prepare(`
+          INSERT OR IGNORE INTO categories(user_id, type, name, is_system, sort)
+          VALUES(?, ?, ?, 1, ?)
+        `).bind(adminId, type, names[i], i).run();
+      } catch (e) {}
+    }
+  }
+}
+
 function jsonResponse(code, msg, data = null) {
   return new Response(JSON.stringify({ code, msg, data }), {
     headers: { 'Content-Type': 'application/json; charset=utf-8' }
@@ -699,51 +675,47 @@ function getToken(request) {
   return authHeader.substring(7);
 }
 
-function generateJwt(payload, env) {
+async function generateJwt(payload, env) {
   const secret = env.JWT_SECRET || 'jizhang-system-secret-key-2024';
   const header = btoa(JSON.stringify({ alg: 'HS256', typ: 'JWT' }));
   const payloadStr = btoa(JSON.stringify({ ...payload, exp: Math.floor(Date.now() / 1000) + 7 * 24 * 60 * 60 }));
-  return HMACSHA256(`${header}.${payloadStr}`, secret).then(signature => {
-    return `${header}.${payloadStr}.${btoa(signature)}`;
-  });
+  const signature = await HMACSHA256(`${header}.${payloadStr}`, secret);
+  return `${header}.${payloadStr}.${btoa(signature)}`;
 }
 
-function verifyJwt(token, env) {
+async function verifyJwt(token, env) {
   try {
     const secret = env.JWT_SECRET || 'jizhang-system-secret-key-2024';
     const [header, payloadStr, signature] = token.split('.');
     
-    return HMACSHA256(`${header}.${payloadStr}`, secret).then(expectedSignature => {
-      if (signature !== btoa(expectedSignature)) {
-        return null;
-      }
-      
-      const payload = JSON.parse(atob(payloadStr));
-      if (payload.exp && payload.exp < Math.floor(Date.now() / 1000)) {
-        return null;
-      }
-      
-      return payload;
-    });
+    const expectedSignature = await HMACSHA256(`${header}.${payloadStr}`, secret);
+    if (signature !== btoa(expectedSignature)) {
+      return null;
+    }
+    
+    const payload = JSON.parse(atob(payloadStr));
+    if (payload.exp && payload.exp < Math.floor(Date.now() / 1000)) {
+      return null;
+    }
+    
+    return payload;
   } catch {
-    return Promise.resolve(null);
+    return null;
   }
 }
 
-function HMACSHA256(message, secret) {
+async function HMACSHA256(message, secret) {
   const encoder = new TextEncoder();
   const key = encoder.encode(secret);
   const data = encoder.encode(message);
   
-  return crypto.subtle.sign('HMAC', crypto.subtle.importKey('raw', key, { name: 'HMAC', hash: 'SHA-256' }, false, ['sign']), data)
-    .then(signature => {
-      const bytes = new Uint8Array(signature);
-      let result = '';
-      for (let i = 0; i < bytes.length; i++) {
-        result += String.fromCharCode(bytes[i]);
-      }
-      return result;
-    });
+  const signature = await crypto.subtle.sign('HMAC', await crypto.subtle.importKey('raw', key, { name: 'HMAC', hash: 'SHA-256' }, false, ['sign']), data);
+  const bytes = new Uint8Array(signature);
+  let result = '';
+  for (let i = 0; i < bytes.length; i++) {
+    result += String.fromCharCode(bytes[i]);
+  }
+  return result;
 }
 
 function generateCaptcha() {
