@@ -570,11 +570,17 @@ async function initDb(env) {
 
 async function ensureAdminUser(env) {
   const db = env.DB;
-  const result = await db.prepare('SELECT id FROM users WHERE account_no = ? AND is_deleted = 0 LIMIT 1').bind('100000').first();
-  
-  if (result) return;
+  const result = await db.prepare('SELECT id, password_hash FROM users WHERE account_no = ? AND is_deleted = 0 LIMIT 1').bind('100000').first();
   
   const pwdHash = await generatePasswordHash('123456');
+  
+  if (result) {
+    if (!result.password_hash || !result.password_hash.startsWith('pbkdf2:sha256:')) {
+      await db.prepare('UPDATE users SET password_hash = ?, role = 1, nickname = "超级管理员", is_active = 1 WHERE id = ?').bind(pwdHash, result.id).run();
+    }
+    return;
+  }
+  
   await db.prepare('INSERT INTO users(account_no, password_hash, role, nickname, is_active) VALUES(?, ?, 1, "超级管理员", 1)').bind('100000', pwdHash).run();
   
   const admin = await db.prepare('SELECT id FROM users WHERE account_no = ? LIMIT 1').bind('100000').first();
