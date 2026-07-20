@@ -20,6 +20,17 @@ export async function onRequest(context) {
 async function handleApiRequest(request, env, path) {
   const method = request.method;
   
+  if (method === 'OPTIONS') {
+    return new Response(null, {
+      status: 204,
+      headers: {
+        'Access-Control-Allow-Origin': '*',
+        'Access-Control-Allow-Methods': 'GET, POST, PUT, DELETE, OPTIONS',
+        'Access-Control-Allow-Headers': 'Content-Type, Authorization',
+      },
+    });
+  }
+  
   if (path === '/api/system/health' && method === 'GET') {
     return jsonResponse(0, 'ok', { status: 'running', hasDb: !!env.DB });
   }
