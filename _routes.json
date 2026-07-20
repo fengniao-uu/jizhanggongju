@@ -1,0 +1,18 @@
+{
+  "version": 1,
+  "routes": [
+    {
+      "src": "/api/*",
+      "middleware": { "verify": false },
+      "headers": {
+        "Access-Control-Allow-Origin": "*",
+        "Access-Control-Allow-Methods": "GET, POST, PUT, DELETE, OPTIONS",
+        "Access-Control-Allow-Headers": "Content-Type, Authorization"
+      }
+    },
+    {
+      "src": "/*",
+      "dest": "/index.html"
+    }
+  ]
+}
