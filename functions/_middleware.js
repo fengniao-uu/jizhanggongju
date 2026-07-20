@@ -585,10 +585,48 @@ function getToken(request) {
   return authHeader.substring(7);
 }
 
+function base64urlEncode(str) {
+  const encoder = new TextEncoder();
+  const bytes = encoder.encode(str);
+  let result = '';
+  for (let i = 0; i < bytes.length; i += 3) {
+    const b1 = bytes[i];
+    const b2 = bytes[i + 1] || 0;
+    const b3 = bytes[i + 2] || 0;
+    result += String.fromCharCode(((b1 >> 2) & 63) + 65);
+    result += String.fromCharCode((((b1 & 3) << 4) | ((b2 >> 4) & 15)) + 65);
+    result += String.fromCharCode((((b2 & 15) << 2) | ((b3 >> 6) & 3)) + 65);
+    result += String.fromCharCode((b3 & 63) + 65);
+  }
+  if (bytes.length % 3 === 1) {
+    result = result.slice(0, -2);
+  } else if (bytes.length % 3 === 2) {
+    result = result.slice(0, -1);
+  }
+  return result.replace(/\+/g, '-').replace(/\//g, '_');
+}
+
+function base64urlDecode(str) {
+  str = str.replace(/-/g, '+').replace(/_/g, '/');
+  while (str.length % 4 !== 0) str += '=';
+  const bytes = [];
+  for (let i = 0; i < str.length; i += 4) {
+    const c1 = str.charCodeAt(i) - 65;
+    const c2 = str.charCodeAt(i + 1) - 65;
+    const c3 = str.charCodeAt(i + 2) - 65;
+    const c4 = str.charCodeAt(i + 3) - 65;
+    bytes.push((c1 << 2) | (c2 >> 4));
+    if (c3 !== -1) bytes.push(((c2 & 15) << 4) | (c3 >> 2));
+    if (c4 !== -1) bytes.push(((c3 & 3) << 6) | c4);
+  }
+  const decoder = new TextDecoder();
+  return decoder.decode(new Uint8Array(bytes));
+}
+
 async function generateJwtSimple(payload, env) {
   const secret = env.JWT_SECRET || 'jizhang-system-secret-key-2024';
-  const header = btoa(JSON.stringify({ alg: 'HS256', typ: 'JWT' })).replace(/\+/g, '-').replace(/\//g, '_').replace(/=/g, '');
-  const payloadStr = btoa(JSON.stringify({ ...payload, exp: Math.floor(Date.now() / 1000) + 7 * 24 * 60 * 60 })).replace(/\+/g, '-').replace(/\//g, '_').replace(/=/g, '');
+  const header = base64urlEncode(JSON.stringify({ alg: 'HS256', typ: 'JWT' }));
+  const payloadStr = base64urlEncode(JSON.stringify({ ...payload, exp: Math.floor(Date.now() / 1000) + 7 * 24 * 60 * 60 }));
   const data = header + '.' + payloadStr;
   const signature = await hmacSha256(data, secret);
   return header + '.' + payloadStr + '.' + signature;
@@ -605,8 +643,7 @@ async function verifyJwtSimple(token, env) {
     if (signature !== expectedSignature) {
       return null;
     }
-    const payloadBytes = atob(payloadStr.replace(/-/g, '+').replace(/_/g, '/'));
-    const payload = JSON.parse(payloadBytes);
+    const payload = JSON.parse(base64urlDecode(payloadStr));
     if (payload.exp && payload.exp < Math.floor(Date.now() / 1000)) {
       return null;
     }
