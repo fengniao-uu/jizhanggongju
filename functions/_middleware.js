@@ -75,6 +75,14 @@ async function handleApiRequest(request, env, path) {
     return jsonResponse(0, '更新成功', userInfo);
   }
   
+  if (path === '/api/auth/delete-account' && method === 'POST') {
+    return jsonResponse(0, '删除成功');
+  }
+  
+  if (path === '/api/auth/sessions' && method === 'GET') {
+    return jsonResponse(0, 'ok', []);
+  }
+  
   if (path === '/api/dashboard/summary' && method === 'GET') {
     return jsonResponse(0, '获取仪表盘汇总成功', {
       cards: [
@@ -144,6 +152,23 @@ async function handleApiRequest(request, env, path) {
     });
   }
   
+  if (path === '/api/io/transactions/import-preview' && method === 'POST') {
+    return jsonResponse(0, 'ok', { preview_id: 'preview_' + Date.now(), rows: [], errors: [] });
+  }
+  
+  if (path === '/api/io/transactions/import-confirm' && method === 'POST') {
+    return jsonResponse(0, '导入成功', { imported: 0, skipped: 0 });
+  }
+  
+  if (path.startsWith('/api/io/transactions/export') && method === 'GET') {
+    return new Response('export data', {
+      headers: {
+        'Content-Type': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+        'Content-Disposition': 'attachment; filename=transactions.xlsx',
+      },
+    });
+  }
+  
   if (path === '/api/categories' && method === 'GET') {
     return jsonResponse(0, 'ok', [
       { id: 1, name: '房租', type: '收入', is_system: 1, sort: 0, disabled: 0 },
@@ -196,6 +221,23 @@ async function handleApiRequest(request, env, path) {
   
   if (path.startsWith('/api/reminders/') && path.endsWith('/renew') && method === 'POST') {
     return jsonResponse(0, '续租成功');
+  }
+  
+  if (path === '/api/io/reminders/import-preview' && method === 'POST') {
+    return jsonResponse(0, 'ok', { preview_id: 'preview_' + Date.now(), rows: [], errors: [] });
+  }
+  
+  if (path === '/api/io/reminders/import-confirm' && method === 'POST') {
+    return jsonResponse(0, '导入成功', { imported: 0, skipped: 0 });
+  }
+  
+  if (path.startsWith('/api/io/reminders/export') && method === 'GET') {
+    return new Response('export data', {
+      headers: {
+        'Content-Type': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+        'Content-Disposition': 'attachment; filename=reminders.xlsx',
+      },
+    });
   }
   
   if (path === '/api/stats/summary' && method === 'GET') {
@@ -320,6 +362,24 @@ async function handleApiRequest(request, env, path) {
   if (path.startsWith('/api/admin/announcements/') && path.endsWith('/pin') && method === 'POST') {
     if (decoded.role !== 1) return jsonResponse(403, '无权限');
     return jsonResponse(0, '置顶成功');
+  }
+  
+  if (path.startsWith('/api/io/backup/full') && method === 'GET') {
+    return new Response('backup data', {
+      headers: {
+        'Content-Type': 'application/zip',
+        'Content-Disposition': 'attachment; filename=backup.zip',
+      },
+    });
+  }
+  
+  if (path.startsWith('/api/io/backup/transactions') && method === 'GET') {
+    return new Response('tx backup data', {
+      headers: {
+        'Content-Type': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+        'Content-Disposition': 'attachment; filename=tx_backup.xlsx',
+      },
+    });
   }
   
   return jsonResponse(404, '接口不存在');
