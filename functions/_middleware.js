@@ -134,7 +134,8 @@ async function handleApiRequestWithDb(request, env, path) {
   const method = request.method;
   const db = env.DB;
 
-  if (method === 'OPTIONS') {
+  try {
+    if (method === 'OPTIONS') {
     return new Response(null, {
       status: 204,
       headers: {
@@ -347,10 +348,14 @@ async function handleApiRequestWithDb(request, env, path) {
   }
 
   return jsonResponse(404, '接口不存在');
+  } catch (error) {
+    console.error('API Error:', error);
+    return jsonResponse(500, '服务器错误: ' + error.message);
+  }
 }
 
 async function initDbSchema(db) {
-  const schema = `
+  const schemaStatements = [
     CREATE TABLE IF NOT EXISTS users (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         account_no CHAR(6) NOT NULL UNIQUE,
@@ -365,8 +370,7 @@ async function initDbSchema(db) {
         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
         last_login_at TIMESTAMP,
         is_deleted BOOLEAN NOT NULL DEFAULT 0
-    );
-
+    ),
     CREATE TABLE IF NOT EXISTS categories (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         user_id INTEGER NOT NULL,
@@ -376,8 +380,7 @@ async function initDbSchema(db) {
         sort INTEGER NOT NULL DEFAULT 0,
         disabled BOOLEAN NOT NULL DEFAULT 0,
         UNIQUE(user_id, type, name)
-    );
-
+    ),
     CREATE TABLE IF NOT EXISTS transactions (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         user_id INTEGER NOT NULL,
@@ -391,8 +394,7 @@ async function initDbSchema(db) {
         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
         updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
         deleted BOOLEAN NOT NULL DEFAULT 0
-    );
-
+    ),
     CREATE TABLE IF NOT EXISTS reminders (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         user_id INTEGER NOT NULL,
@@ -405,8 +407,7 @@ async function initDbSchema(db) {
         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
         updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
         deleted BOOLEAN NOT NULL DEFAULT 0
-    );
-
+    ),
     CREATE TABLE IF NOT EXISTS session_logs (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         user_id INTEGER NOT NULL,
@@ -418,8 +419,7 @@ async function initDbSchema(db) {
         is_success BOOLEAN NOT NULL DEFAULT 1,
         fail_reason VARCHAR(40) NOT NULL DEFAULT '',
         attempt_account CHAR(6) NOT NULL DEFAULT ''
-    );
-
+    ),
     CREATE TABLE IF NOT EXISTS captcha_store (
         id CHAR(32) PRIMARY KEY,
         code_hash CHAR(64) NOT NULL,
@@ -427,8 +427,7 @@ async function initDbSchema(db) {
         expires_at TIMESTAMP NOT NULL,
         used BOOLEAN NOT NULL DEFAULT 0,
         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-    );
-
+    ),
     CREATE TABLE IF NOT EXISTS announcements (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         title VARCHAR(80) NOT NULL,
@@ -444,17 +443,18 @@ async function initDbSchema(db) {
         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
         updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
         is_deleted BOOLEAN NOT NULL DEFAULT 0
-    );
-  `;
+    )
+  ];
 
-  for (const stmt of schema.split(';')) {
-    const trimmed = stmt.trim();
-    if (trimmed && !trimmed.startsWith('--')) {
-      try {
-        await db.prepare(trimmed).run();
-      } catch (e) {
-        console.warn('Schema init warning:', e.message);
-      }
+  for (const stmt of schemaStatements) {
+    try {
+      await db.prepare(stmt).run();
+    } catch (e) {
+      console.error('Schema init error:', e.message);
+      throw e;
+    }
+  }
+}
     }
   }
 }
@@ -586,7 +586,7 @@ async function handleCaptcha(db) {
   try {
     const { captchaId, code, codeHash, salt, expiresAt } = await generateCaptcha();
 
-    await db.prepare('DELETE FROM captcha_store WHERE expires_at < CURRENT_TIMESTAMP LIMIT 100').run();
+    await db.prepare('DELETE FROM captcha_store WHERE expires_at < CURRENT_TIMESTAMP').run();
 
     await db.prepare(
       'INSERT INTO captcha_store(id, code_hash, salt, expires_at, used) VALUES(?, ?, ?, ?, 0)'
