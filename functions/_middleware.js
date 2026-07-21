@@ -134,8 +134,7 @@ async function handleApiRequestWithDb(request, env, path) {
   const method = request.method;
   const db = env.DB;
 
-  try {
-    if (method === 'OPTIONS') {
+  if (method === 'OPTIONS') {
     return new Response(null, {
       status: 204,
       headers: {
@@ -348,15 +347,11 @@ async function handleApiRequestWithDb(request, env, path) {
   }
 
   return jsonResponse(404, '接口不存在');
-  } catch (error) {
-    console.error('API Error:', error);
-    return jsonResponse(500, '服务器错误: ' + error.message);
-  }
 }
 
 async function initDbSchema(db) {
   const schemaStatements = [
-    CREATE TABLE IF NOT EXISTS users (
+    `CREATE TABLE IF NOT EXISTS users (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         account_no CHAR(6) NOT NULL UNIQUE,
         password_hash VARCHAR(255) NOT NULL,
@@ -370,8 +365,8 @@ async function initDbSchema(db) {
         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
         last_login_at TIMESTAMP,
         is_deleted BOOLEAN NOT NULL DEFAULT 0
-    ),
-    CREATE TABLE IF NOT EXISTS categories (
+    )`,
+    `CREATE TABLE IF NOT EXISTS categories (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         user_id INTEGER NOT NULL,
         type CHAR(4) NOT NULL,
@@ -380,8 +375,8 @@ async function initDbSchema(db) {
         sort INTEGER NOT NULL DEFAULT 0,
         disabled BOOLEAN NOT NULL DEFAULT 0,
         UNIQUE(user_id, type, name)
-    ),
-    CREATE TABLE IF NOT EXISTS transactions (
+    )`,
+    `CREATE TABLE IF NOT EXISTS transactions (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         user_id INTEGER NOT NULL,
         type CHAR(4) NOT NULL,
@@ -394,8 +389,8 @@ async function initDbSchema(db) {
         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
         updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
         deleted BOOLEAN NOT NULL DEFAULT 0
-    ),
-    CREATE TABLE IF NOT EXISTS reminders (
+    )`,
+    `CREATE TABLE IF NOT EXISTS reminders (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         user_id INTEGER NOT NULL,
         room_no VARCHAR(20) NOT NULL,
@@ -407,8 +402,8 @@ async function initDbSchema(db) {
         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
         updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
         deleted BOOLEAN NOT NULL DEFAULT 0
-    ),
-    CREATE TABLE IF NOT EXISTS session_logs (
+    )`,
+    `CREATE TABLE IF NOT EXISTS session_logs (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         user_id INTEGER NOT NULL,
         login_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
@@ -418,17 +413,18 @@ async function initDbSchema(db) {
         revoked BOOLEAN NOT NULL DEFAULT 0,
         is_success BOOLEAN NOT NULL DEFAULT 1,
         fail_reason VARCHAR(40) NOT NULL DEFAULT '',
-        attempt_account CHAR(6) NOT NULL DEFAULT ''
-    ),
-    CREATE TABLE IF NOT EXISTS captcha_store (
+        attempt_account CHAR(6) NOT NULL DEFAULT '',
+        is_deleted BOOLEAN NOT NULL DEFAULT 0
+    )`,
+    `CREATE TABLE IF NOT EXISTS captcha_store (
         id CHAR(32) PRIMARY KEY,
         code_hash CHAR(64) NOT NULL,
         salt CHAR(16) NOT NULL,
         expires_at TIMESTAMP NOT NULL,
         used BOOLEAN NOT NULL DEFAULT 0,
         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-    ),
-    CREATE TABLE IF NOT EXISTS announcements (
+    )`,
+    `CREATE TABLE IF NOT EXISTS announcements (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         title VARCHAR(80) NOT NULL,
         content TEXT NOT NULL,
@@ -443,7 +439,7 @@ async function initDbSchema(db) {
         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
         updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
         is_deleted BOOLEAN NOT NULL DEFAULT 0
-    )
+    )`
   ];
 
   for (const stmt of schemaStatements) {
@@ -452,9 +448,6 @@ async function initDbSchema(db) {
     } catch (e) {
       console.error('Schema init error:', e.message);
       throw e;
-    }
-  }
-}
     }
   }
 }
@@ -586,7 +579,7 @@ async function handleCaptcha(db) {
   try {
     const { captchaId, code, codeHash, salt, expiresAt } = await generateCaptcha();
 
-    await db.prepare('DELETE FROM captcha_store WHERE expires_at < CURRENT_TIMESTAMP').run();
+    await db.prepare('DELETE FROM captcha_store WHERE expires_at < CURRENT_TIMESTAMP LIMIT 100').run();
 
     await db.prepare(
       'INSERT INTO captcha_store(id, code_hash, salt, expires_at, used) VALUES(?, ?, ?, ?, 0)'
