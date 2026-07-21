@@ -493,7 +493,7 @@ async function ensureAdminSeeded(db, env) {
 async function generatePasswordHash(password) {
   const encoder = new TextEncoder();
   const salt = crypto.getRandomValues(new Uint8Array(16));
-  const iterations = 260000;
+  const iterations = 60000;
 
   const keyMaterial = await crypto.subtle.importKey(
     'raw',
