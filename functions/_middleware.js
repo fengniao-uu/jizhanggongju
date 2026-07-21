@@ -134,11 +134,6 @@ async function handleApiRequestWithDb(request, env, path) {
   const method = request.method;
   const db = env.DB;
 
-  if (!db) {
-    console.error('D1 Database binding not found!');
-    return jsonResponse(500, '数据库未配置，请检查Cloudflare Pages的D1数据库绑定');
-  }
-
   if (method === 'OPTIONS') {
     return new Response(null, {
       status: 204,
@@ -517,14 +512,16 @@ async function generatePasswordHash(password) {
   const hashHex = Array.from(new Uint8Array(hash)).map(b => b.toString(16).padStart(2, '0')).join('');
   const saltHex = Array.from(salt).map(b => b.toString(16).padStart(2, '0')).join('');
 
-  return pbkdf2:sha256:{saltHex}{hashHex};
+  return 'pbkdf2:sha256:' + iterations + '$' + saltHex + '$' + hashHex;
 }
 
 async function verifyPassword(password, storedHash) {
   const parts = storedHash.split('$');
   if (parts.length !== 3) return false;
 
-  const [algo, saltHex, hashHex] = parts;
+  const algo = parts[0];
+  const saltHex = parts[1];
+  const hashHex = parts[2];
   const iterations = parseInt(algo.split(':')[2]);
   if (isNaN(iterations) || iterations <= 0) return false;
 
@@ -709,6 +706,7 @@ async function handleLoginWithDb(request, env, db) {
     },
   });
 }
+
 async function handleRegisterWithDb(request, env, db) {
   await initDbSchema(db);
 
