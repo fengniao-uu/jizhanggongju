@@ -187,7 +187,7 @@ class SQLiteAdapter(DatabaseAdapter):
         """
         import config
         admin_acc = str(getattr(config, "ADMIN_DEFAULT_ACCOUNT", "100000") or "100000").strip()[:6]
-        admin_pwd = str(getattr(config, "ADMIN_DEFAULT_PASSWORD", "123456") or "123456").strip()[:6]
+        admin_pwd = str(getattr(config, "ADMIN_DEFAULT_PASSWORD", "123456") or "123456").strip()[:12]
         admin_role = int(getattr(config, "ROLE_ADMIN", 1))
         disable_default = bool(getattr(config, "DISABLE_DEFAULT_ADMIN", False))
         with self._conn() as c:
@@ -210,9 +210,8 @@ class SQLiteAdapter(DatabaseAdapter):
                 return 0
             import re
             from werkzeug.security import generate_password_hash
-            if not re.fullmatch(r"\d{6}", admin_acc) or not re.fullmatch(r"\d{6}", admin_pwd):
+            if not re.fullmatch(r"\d{6}", admin_acc):
                 admin_acc = "100000"
-                admin_pwd = "123456"
             u = c.execute(
                 "SELECT id, role FROM users WHERE account_no = ? AND is_deleted = 0 LIMIT 1",
                 (admin_acc,),

@@ -1,13 +1,15 @@
-from flask import Blueprint, request, jsonify, g
+from flask import Blueprint, request, jsonify, g, send_file
 import datetime as dt
 import time as _time
 from collections import defaultdict, deque
 import threading as _th
+import io
 
 import config
 from utils.decorators import login_required
 from services.auth_service import AuthService
 from db import get_adapter
+from utils.captcha_helper import generate_captcha, is_captcha_disabled
 
 auth_bp = Blueprint("auth", __name__)
 
@@ -81,6 +83,34 @@ def register():
     return jsonify(result)
 
 
+@auth_bp.get("/captcha")
+def captcha():
+    ip = _remote_ip()
+    ok, remain, reset_s = _rate_limit_check("captcha", ip, config.RATE_LIMIT_CAPTCHA_PER_MIN)
+    if not ok:
+        return jsonify({"code": 429, "msg": f"验证码请求过于频繁，请 {reset_s} 秒后再试", "data": {"retry_after": reset_s}}), 429
+    try:
+        captcha_data = generate_captcha()
+        get_adapter().create_captcha(
+            captcha_data["captcha_id"],
+            captcha_data["code_hash"],
+            captcha_data["salt"],
+            captcha_data["expires_at"],
+        )
+        return jsonify({
+            "code": 0,
+            "msg": "ok",
+            "data": {
+                "captcha_id": captcha_data["captcha_id"],
+                "image": captcha_data["image"],
+                "ttl": captcha_data["ttl"],
+                "disabled": captcha_data.get("disabled", False),
+            },
+        })
+    except Exception as e:
+        return jsonify({"code": 500, "msg": "验证码生成失败", "data": {"error": str(e)}}), 500
+
+
 @auth_bp.post("/login")
 def login():
     ip = _remote_ip()
@@ -98,6 +128,45 @@ def login():
     r = _json()
     account_no = r.get("account_no") or r.get("username")
     password = r.get("password")
+    
+    captcha_id = r.get("captcha_id")
+    captcha_code = r.get("captcha_code")
+    
+    if not is_captcha_disabled():
+        if not captcha_id or not captcha_code:
+            try:
+                get_adapter().insert_session_log(
+                    user_id=0, jti="", ip=ip, ua=ua,
+                    is_success=False, fail_reason="captcha_missing", attempt_account=str(account_no or "")[:6],
+                )
+            except Exception:
+                pass
+            return jsonify({"code": 400, "msg": "请输入验证码", "data": {"captcha_required": True}}), 400
+        
+        verify_result = get_adapter().verify_and_consume_captcha(
+            captcha_id,
+            str(captcha_code).upper().strip(),
+            dt.datetime.now(dt.timezone.utc).strftime("%Y-%m-%d %H:%M:%S"),
+        )
+        if verify_result == 1:
+            try:
+                get_adapter().insert_session_log(
+                    user_id=0, jti="", ip=ip, ua=ua,
+                    is_success=False, fail_reason="captcha_invalid", attempt_account=str(account_no or "")[:6],
+                )
+            except Exception:
+                pass
+            return jsonify({"code": 400, "msg": "验证码已过期或不存在，请点击刷新", "data": {"captcha_required": True}}), 400
+        if verify_result == 2:
+            try:
+                get_adapter().insert_session_log(
+                    user_id=0, jti="", ip=ip, ua=ua,
+                    is_success=False, fail_reason="captcha_wrong", attempt_account=str(account_no or "")[:6],
+                )
+            except Exception:
+                pass
+            return jsonify({"code": 400, "msg": "验证码错误，请重新输入", "data": {"captcha_required": True}}), 400
+    
     result = AuthService.login(account_no, password, ip=ip, ua=ua)
     if isinstance(result, tuple):
         body, code = result

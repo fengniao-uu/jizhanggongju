@@ -1,4 +1,4 @@
-﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿(function () {
+﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿(function () {
   const TOKEN_KEY = "account_app_token";
 
   document.addEventListener("DOMContentLoaded", function () {
@@ -6,7 +6,19 @@
     window._lpAuthInitRan = true;
     const cardInner = document.querySelector(".lp-card-inner");
     if (cardInner && !document.getElementById("lp-auth-tabs")) {
-      const oldHtml = cardInner.innerHTML;
+      let oldHtml = cardInner.innerHTML;
+      const captchaHtml = `
+          <div id="lp-captcha-wrap" class="lp-input-group">
+            <span class="lp-input-icon">
+              <svg viewBox="0 0 24 24" fill="none" stroke="#8ea4c9" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/><path d="M16 11l2 2 4-4"/></svg>
+            </span>
+            <img id="login-captcha-img" src="" alt="验证码" class="lp-captcha-img" onclick="document.getElementById('refresh-captcha-btn').click()">
+            <input id="login-captcha" class="lp-input lp-captcha-input" type="text" placeholder="请输入验证码" maxlength="6" autocomplete="off" inputmode="alphanumeric">
+            <button id="refresh-captcha-btn" type="button" class="lp-refresh-captcha" aria-label="刷新验证码">
+              <svg viewBox="0 0 24 24" fill="none" stroke="#8ea4c9" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12a9 9 0 0 0-9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"/><path d="M3 3v5h5"/><path d="M3 12a9 9 0 0 0 9 9 9.75 9.75 0 0 0-6.74 2.74L21 16"/><path d="M16 21h5v-5"/></svg>
+            </button>
+          </div>`;
+      oldHtml = oldHtml.replace("</form>", captchaHtml + "</form>");
       cardInner.innerHTML = `
         <div id="lp-auth-tabs" class="lp-tabs">
           <div class="lp-tab active" data-tab="login">登录</div>
@@ -89,6 +101,10 @@
     const userInput = document.getElementById("login-username");
     const regBtn = document.getElementById("reg-btn");
     const regMsg = document.getElementById("reg-msg");
+    const captchaImg = document.getElementById("login-captcha-img");
+    const captchaInput = document.getElementById("login-captcha");
+    const refreshCaptchaBtn = document.getElementById("refresh-captcha-btn");
+    let _currentCaptchaId = "";
 
     const _toastMsg = (el, text, type) => {
       if (!el) return;
@@ -413,6 +429,42 @@
       }, 3500);
     };
 
+    // ========== 验证码加载与刷新 ==========
+    const _loadCaptcha = async () => {
+      if (!captchaImg || !refreshCaptchaBtn) return;
+      try {
+        refreshCaptchaBtn.disabled = true;
+        refreshCaptchaBtn.style.opacity = "0.5";
+        const res = await window.API.captcha();
+        if (res && res.code === 0 && res.data && res.data.image) {
+          captchaImg.src = res.data.image;
+          _currentCaptchaId = res.data.captcha_id || "";
+          if (captchaInput) captchaInput.value = "";
+        } else {
+          _toastMsg(msg, "验证码加载失败，请重试");
+        }
+      } catch (err) {
+        console.warn("[captcha] 加载失败", err);
+      } finally {
+        if (refreshCaptchaBtn) {
+          refreshCaptchaBtn.disabled = false;
+          refreshCaptchaBtn.style.opacity = "1";
+        }
+      }
+    };
+    if (refreshCaptchaBtn) {
+      refreshCaptchaBtn.addEventListener("click", (e) => {
+        try { e.preventDefault(); } catch (_) {}
+        _loadCaptcha();
+      });
+    }
+    if (captchaImg) {
+      captchaImg.addEventListener("click", () => {
+        _loadCaptcha();
+      });
+    }
+    _loadCaptcha();
+
     // ========== 密码可见性切换 ==========
     if (eye && pwd) {
       eye.addEventListener("click", function () {
@@ -437,14 +489,15 @@
         _toastMsg(msg, "");
         const u = userInput ? userInput.value.trim() : "";
         const p = pwd ? pwd.value.trim() : "";
+        const captchaCode = captchaInput ? captchaInput.value.trim() : "";
         if (!u || !p) return _toastMsg(msg, "请输入账号和密码");
         if (!(/^\d{6}$/.test(u) || /^1[3-9]\d{9}$/.test(u))) return _toastMsg(msg, "账号必须是 6 位数字或 11 位手机号");
         if (!/^\d{6,12}$/.test(p)) return _toastMsg(msg, "密码必须是 6~12 位数字");
         if (!window.API || !window.Router) return _toastMsg(msg, "系统初始化失败，请稍后重试");
         try {
-          const res = await window.API.login(u, p);
+          const res = await window.API.login(u, p, _currentCaptchaId, captchaCode);
           if (res && res.code === 0) {
-            const emptyAll = ["login-username", "login-password",
+            const emptyAll = ["login-username", "login-password", "login-captcha",
                               "reg-account", "reg-password", "reg-password2", "reg-nickname"];
             emptyAll.forEach((id) => {
               const el = document.getElementById(id);

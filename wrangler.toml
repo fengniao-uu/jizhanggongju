@@ -1,0 +1,20 @@
+name = "rent-admin"
+main = "functions/_middleware.js"
+compatibility_date = "2025-07-21"
+compatibility_flags = ["nodejs_compat"]
+
+[site]
+bucket = "./"
+entry-point = "functions"
+
+[vars]
+JWT_SECRET = "dev_secret_change_me_in_production"
+ADMIN_DEFAULT_ACCOUNT = "100000"
+ADMIN_DEFAULT_PASSWORD = "123456"
+LOGIN_MAX_ATTEMPTS = "5"
+LOGIN_LOCK_MINUTES = "30"
+
+[[d1_databases]]
+binding = "DB"
+database_name = "rent-admin-db"
+database_id = "your-database-id-here"

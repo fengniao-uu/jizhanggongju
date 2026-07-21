@@ -33,7 +33,7 @@ def seed_default_admin_if_needed() -> int:
     adapter = get_adapter()
     admin_role = int(getattr(config, "ROLE_ADMIN", 1))
     admin_acc = str(getattr(config, "ADMIN_DEFAULT_ACCOUNT", "100000") or "100000").strip()[:6]
-    admin_pwd = str(getattr(config, "ADMIN_DEFAULT_PASSWORD", "123456") or "123456").strip()[:6]
+    admin_pwd = str(getattr(config, "ADMIN_DEFAULT_PASSWORD", "123456") or "123456").strip()[:12]
     existing = adapter.get_user_by_account(admin_acc)
     if existing:
         return int(existing["id"])

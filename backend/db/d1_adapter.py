@@ -107,9 +107,16 @@ def set_d1_db(db):
 
 def get_d1_db():
     global _d1_db
-    if _d1_db is None:
-        raise RuntimeError("D1 database not initialized. Call set_d1_db() first.")
-    return _d1_db
+    if _d1_db is not None:
+        return _d1_db
+    import os
+    if "D1_DATABASE" in os.environ:
+        try:
+            _d1_db = os.environ["D1_DATABASE"]
+            return _d1_db
+        except Exception:
+            pass
+    raise RuntimeError("D1 database not initialized. Call set_d1_db(db) first, or set D1_DATABASE environment variable.")
 
 
 class D1Adapter(DatabaseAdapter):
@@ -212,7 +219,7 @@ class D1Adapter(DatabaseAdapter):
     def ensure_admin_seeded(self) -> int:
         import config
         admin_acc = str(getattr(config, "ADMIN_DEFAULT_ACCOUNT", "100000") or "100000").strip()[:6]
-        admin_pwd = str(getattr(config, "ADMIN_DEFAULT_PASSWORD", "123456") or "123456").strip()[:6]
+        admin_pwd = str(getattr(config, "ADMIN_DEFAULT_PASSWORD", "123456") or "123456").strip()[:12]
         admin_role = int(getattr(config, "ROLE_ADMIN", 1))
         disable_default = bool(getattr(config, "DISABLE_DEFAULT_ADMIN", False))
         existing_admin = self._query_one(
@@ -225,9 +232,8 @@ class D1Adapter(DatabaseAdapter):
             return 0
         import re
         from werkzeug.security import generate_password_hash
-        if not re.fullmatch(r"\d{6}", admin_acc) or not re.fullmatch(r"\d{6}", admin_pwd):
+        if not re.fullmatch(r"\d{6}", admin_acc):
             admin_acc = "100000"
-            admin_pwd = "123456"
         u = self._query_one(
             "SELECT id, role FROM users WHERE account_no = ? AND is_deleted = 0 LIMIT 1",
             [admin_acc],
@@ -772,13 +778,52 @@ class D1Adapter(DatabaseAdapter):
 
     def active_announcements(self) -> List[Dict[str, Any]]:
         rows = self._query(
-            """SELECT * FROM announcements WHERE is_active = 1 AND is_deleted = 1 = 0
+            """SELECT * FROM announcements WHERE is_active = 1 AND is_deleted = 0
                AND (effective_at IS NULL OR effective_at <= datetime('now'))
                AND (expire_at IS NULL OR expire_at >= datetime('now'))
                ORDER BY priority DESC, id DESC""",
             [],
         )
         return [dict(r) for r in rows]
+
+    def create_captcha(self, captcha_id: str, code_hash: str, salt: str, expires_at_iso: str) -> None:
+        try:
+            self._execute_run("DELETE FROM captcha_store WHERE expires_at < datetime('now') LIMIT 100")
+        except Exception:
+            pass
+        self._execute_run(
+            "INSERT INTO captcha_store(id, code_hash, salt, expires_at) VALUES(?,?,?,?)",
+            [captcha_id[:32], code_hash[:64], salt[:16], expires_at_iso],
+        )
+
+    def verify_and_consume_captcha(self, captcha_id: str, input_upper: str, now_iso: str) -> int:
+        if not captcha_id or not input_upper:
+            return 1
+        captcha_id = str(captcha_id).strip()[:32]
+        import hashlib
+        row = self._query_one(
+            "SELECT id, code_hash, salt, used, expires_at FROM captcha_store WHERE id = ? LIMIT 1",
+            [captcha_id],
+        )
+        if not row:
+            return 1
+        used = int(row.get("used", 0) or 0)
+        if used:
+            return 1
+        expires_at = row.get("expires_at")
+        if not expires_at or str(expires_at) < str(now_iso):
+            try:
+                self._execute_run("DELETE FROM captcha_store WHERE id = ?", [captcha_id])
+            except Exception:
+                pass
+            return 1
+        inp_hash = hashlib.sha256((str(row.get("salt", "")) + str(input_upper).strip().upper()).encode("utf-8")).hexdigest()
+        matched = (inp_hash == str(row.get("code_hash", "")))
+        try:
+            self._execute_run("UPDATE captcha_store SET used = 1 WHERE id = ?", [captcha_id])
+        except Exception:
+            pass
+        return 0 if matched else 2
 
     def captcha_store_save(self, captcha_id: str, code_hash: str, salt: str, expires_at: str) -> None:
         self._execute_run(

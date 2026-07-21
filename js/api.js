@@ -201,12 +201,13 @@ function authToken() {
 }
 
 const API = {
-  // ========== 认证 8 ==========
-  login: (account_no, password) =>
+  // ========== 认证 ==========
+  login: (account_no, password, captcha_id, captcha_code) =>
     api("/api/auth/login", {
       method: "POST",
-      body: JSON.stringify({ account_no, password }),
+      body: JSON.stringify({ account_no, password, captcha_id, captcha_code }),
     }),
+  captcha: () => api("/api/auth/captcha"),
   register: (account_no, password, nickname) =>
     api("/api/auth/register", { method: "POST", body: JSON.stringify({ account_no, password, nickname: nickname || "" }) }),
   logout: () => api("/api/auth/logout", { method: "POST" }),

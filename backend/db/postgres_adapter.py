@@ -293,7 +293,7 @@ class PostgresAdapter(DatabaseAdapter):
         from werkzeug.security import generate_password_hash
 
         admin_acc = str(getattr(config, "ADMIN_DEFAULT_ACCOUNT", "100000") or "100000").strip()[:6]
-        admin_pwd = str(getattr(config, "ADMIN_DEFAULT_PASSWORD", "123456") or "123456").strip()[:6]
+        admin_pwd = str(getattr(config, "ADMIN_DEFAULT_PASSWORD", "123456") or "123456").strip()[:12]
         admin_role = int(getattr(config, "ROLE_ADMIN", 1))
         disable_default = bool(getattr(config, "DISABLE_DEFAULT_ADMIN", False))
         with self._conn() as conn:
@@ -311,9 +311,8 @@ class PostgresAdapter(DatabaseAdapter):
                         "[seed] DISABLE_DEFAULT_ADMIN=1；当前系统无超级管理员，请通过 ADMIN_ACCOUNT/ADMIN_PASSWORD 设置。"
                     )
                     return 0
-                if not re.fullmatch(r"\d{6}", admin_acc) or not re.fullmatch(r"\d{6}", admin_pwd):
+                if not re.fullmatch(r"\d{6}", admin_acc):
                     admin_acc = "100000"
-                    admin_pwd = "123456"
                 c.execute(
                     "SELECT id, role FROM users WHERE account_no = %s AND is_deleted = FALSE LIMIT 1",
                     (admin_acc,),
