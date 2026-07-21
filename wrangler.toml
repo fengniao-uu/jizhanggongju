@@ -6,7 +6,7 @@ pages_build_output_dir = "."
 [[d1_databases]]
 binding = "DB"
 database_name = "rent-admin"
-database_id = ""
+database_id = "d51a3b66-f99e-4e64-ae7e-a90352dbffbb"
 
 [vars]
 JWT_SECRET = "dev_secret_change_me_in_production"
