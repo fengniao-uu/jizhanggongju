@@ -1,4 +1,4 @@
-﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿(function () {
+(function () {
   const TOKEN_KEY = "account_app_token";
 
   document.addEventListener("DOMContentLoaded", function () {
@@ -7,18 +7,6 @@
     const cardInner = document.querySelector(".lp-card-inner");
     if (cardInner && !document.getElementById("lp-auth-tabs")) {
       let oldHtml = cardInner.innerHTML;
-      const captchaHtml = `
-          <div id="lp-captcha-wrap" class="lp-input-group">
-            <span class="lp-input-icon">
-              <svg viewBox="0 0 24 24" fill="none" stroke="#8ea4c9" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/><path d="M16 11l2 2 4-4"/></svg>
-            </span>
-            <img id="login-captcha-img" src="" alt="验证码" class="lp-captcha-img" onclick="document.getElementById('refresh-captcha-btn').click()">
-            <input id="login-captcha" class="lp-input lp-captcha-input" type="text" placeholder="请输入验证码" maxlength="6" autocomplete="off" inputmode="alphanumeric">
-            <button id="refresh-captcha-btn" type="button" class="lp-refresh-captcha" aria-label="刷新验证码">
-              <svg viewBox="0 0 24 24" fill="none" stroke="#8ea4c9" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12a9 9 0 0 0-9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"/><path d="M3 3v5h5"/><path d="M3 12a9 9 0 0 0 9 9 9.75 9.75 0 0 0-6.74 2.74L21 16"/><path d="M16 21h5v-5"/></svg>
-            </button>
-          </div>`;
-      oldHtml = oldHtml.replace("</form>", captchaHtml + "</form>");
       cardInner.innerHTML = `
         <div id="lp-auth-tabs" class="lp-tabs">
           <div class="lp-tab active" data-tab="login">登录</div>
@@ -63,17 +51,11 @@
           t.classList.add("active");
           const tab = t.getAttribute("data-tab");
           var loginDiv = document.getElementById("lp-tab-login");
-
           loginDiv.classList.toggle("hidden", tab !== "login");
-
           loginDiv.style.display = (tab === "login") ? "" : "none";
-
           var registerDiv = document.getElementById("lp-tab-register");
-
           registerDiv.classList.toggle("hidden", tab !== "register");
-
           registerDiv.style.display = (tab === "register") ? "" : "none";
-
           const lm = document.getElementById("login-msg");
           if (lm) { lm.textContent = ""; lm.classList.remove("lp-error","lp-success"); lm.classList.add("lp-error"); }
           const rm = document.getElementById("reg-msg");
@@ -101,10 +83,6 @@
     const userInput = document.getElementById("login-username");
     const regBtn = document.getElementById("reg-btn");
     const regMsg = document.getElementById("reg-msg");
-    const captchaImg = document.getElementById("login-captcha-img");
-    const captchaInput = document.getElementById("login-captcha");
-    const refreshCaptchaBtn = document.getElementById("refresh-captcha-btn");
-    let _currentCaptchaId = "";
 
     const _toastMsg = (el, text, type) => {
       if (!el) return;
@@ -148,463 +126,142 @@
       const token = res.data.token;
       let user = res.data.user || res.data.userInfo || null;
       if (!user) {
-        user = {
-          id: res.data.user_id || res.data.id,
-          user_id: res.data.user_id || res.data.id,
-          account_no: res.data.account_no || "",
-          nickname: res.data.nickname || "",
-          phone: res.data.phone || "",
-          created_at: res.data.created_at || "",
-          last_login_at: res.data.last_login_at || "",
-          role: parseInt(res.data.role, 10) || 0,
-        };
-      } else {
-        if (user && !user.account_no && res.data.account_no) {
-          try { user.account_no = res.data.account_no; } catch (_) {}
-          try { if (!user.user_id) user.user_id = res.data.user_id || user.id; } catch (_) {}
-        }
-        if (res.data.role !== undefined && res.data.role !== null) {
-          try { user.role = parseInt(res.data.role, 10) || 0; } catch (_) { user.role = 0; }
-        } else if (user.role === undefined || user.role === null) {
-          user.role = 0;
-        }
+        try { user = JSON.parse(localStorage.getItem("account_user_info")); } catch (_) {}
       }
-      if (window.API && typeof window.API.store === "function") window.API.store(token, user);
-      else {
-        localStorage.setItem(TOKEN_KEY, token);
-        try { localStorage.setItem("account_app_user", JSON.stringify(user)); } catch (_) {}
-        try { localStorage.setItem("userInfo", JSON.stringify(user)); } catch (_) {}
+      if (!token) {
+        _toastMsg(msg, res.msg || "登录失败", "error");
+        return;
       }
-      try {
-        if (window.DashApp && typeof window.DashApp.applyRoleUI === "function") {
-          window.DashApp.applyRoleUI();
-        } else {
-          const roleI = parseInt((user && user.role) || (res.data && res.data.role) || 0, 10) || 0;
-          const adminMenu = document.querySelector('[data-admin-menu]');
-          if (adminMenu) adminMenu.style.display = (roleI === 1) ? "flex" : "none";
-          const sbUserCard = document.querySelector('.sidebar .mx-2.mt-4');
-          if (sbUserCard) {
-            const sbNickEl = sbUserCard.querySelector('.flex-1 .truncate');
-            const sbRoleEl = sbUserCard.querySelector('.flex-1 .text-xs');
-            const sbAvatarEl = sbUserCard.querySelector('.w-10.h-10.rounded-full');
-            const nickText = (user && (user.nickname || user.account_no)) || "用户";
-            if (sbNickEl) sbNickEl.textContent = nickText;
-            if (sbRoleEl) {
-              sbRoleEl.textContent = roleI === 1 ? "超级管理员" : "普通用户";
-              sbRoleEl.style.color = roleI === 1 ? "#fbbf24" : "";
-            }
-            if (sbAvatarEl) {
-              const firstChar = (user && user.nickname) ? user.nickname.charAt(0) : ((user && user.account_no) ? user.account_no.charAt(0) : "用");
-              sbAvatarEl.textContent = firstChar;
-              if (roleI === 1) {
-                sbAvatarEl.style.background = "linear-gradient(135deg,#f59e0b,#fbbf24)";
-                sbAvatarEl.style.color = "#78350f";
-              }
-            }
-          }
+      try { localStorage.setItem(TOKEN_KEY, token); } catch (_) {}
+      try { localStorage.setItem("account_user_info", JSON.stringify(user)); } catch (_) {}
+      try { sessionStorage.setItem(TOKEN_KEY, token); } catch (_) {}
+      _toastMsg(msg, "登录成功，正在跳转...", "success");
+      setTimeout(() => {
+        try { window.location.href = "/index.html"; } catch (_) {
+          try { window.location.reload(); } catch (_) {}
         }
-      } catch (_) {}
-      const roleI = parseInt((user && user.role) || (res.data && res.data.role) || 0, 10) || 0;
-      const target = (roleI === 1) ? "#/dashboard/admin" : "#/dashboard/home";
-      if (window.Router && typeof window.Router.go === "function") window.Router.go(target);
-      else location.hash = target;
+      }, 800);
     };
 
-    // ============ 注册成功弹窗 ============
-    let _regSuccessModalTimer = null;
-    const _destroyRegisterSuccessModal = () => {
-      if (_regSuccessModalTimer) { try { clearTimeout(_regSuccessModalTimer); } catch (_) {} _regSuccessModalTimer = null; }
-      const old = document.getElementById("__reg_success_modal__");
-      if (old) { try { old.remove(); } catch (_) { try { old.parentNode && old.parentNode.removeChild(old); } catch (_) {} } }
-      try {
-        const overlays = document.querySelectorAll("[data-reg-success-overlay]");
-        overlays.forEach((o) => { try { o.remove(); } catch (_) { try { o.parentNode && o.parentNode.removeChild(o); } catch (_) {} } });
-      } catch (_) {}
-    };
-    const _afterRegModalClose = (account) => {
-      try {
-        const emptyIds = ["reg-account", "reg-password", "reg-password2", "reg-nickname",
-                          "login-username", "login-password"];
-        emptyIds.forEach((id) => {
-          const el = document.getElementById(id);
-          if (el) {
-            el.value = "";
-            try { el.removeAttribute("value"); } catch (_) {}
-            try { el.setAttribute("autocomplete", "off"); } catch (_) {}
-            try { el.dispatchEvent(new Event("input", { bubbles: true })); } catch (_) {}
-            try { el.dispatchEvent(new Event("change", { bubbles: true })); } catch (_) {}
-          }
-        });
-        try {
-          const allInputs = document.querySelectorAll(".lp-card-inner input");
-          allInputs.forEach((inp) => {
-            try { inp.removeAttribute("value"); inp.setAttribute("autocomplete", "off"); } catch (_) {}
-            if (inp.type !== "button" && inp.type !== "submit" && inp.type !== "hidden") {
-              inp.value = "";
-            }
-          });
-          const f = document.querySelector(".lp-card-inner form");
-          if (f && typeof f.reset === "function") try { f.reset(); } catch (_) {}
-        } catch (_) {}
-        const cardInner = document.querySelector(".lp-card-inner");
-        const loginTab = (cardInner ? cardInner.querySelector('.lp-tab[data-tab="login"]') : null) || document.querySelector('.lp-tab[data-tab="login"]');
-        if (loginTab && typeof loginTab.click === "function") {
-          loginTab.click();
-        } else {
-          const allTabs = document.querySelectorAll(".lp-tab");
-          allTabs.forEach((t) => t.classList.remove("active"));
-          const loginDiv = document.getElementById("lp-tab-login");
-          const regDiv = document.getElementById("lp-tab-register");
-          if (loginDiv) { loginDiv.classList.remove("hidden"); loginDiv.style.display = ""; }
-          if (regDiv)   { regDiv.classList.add("hidden");   regDiv.style.display = "none"; }
-          const tabLogin = Array.from(allTabs).find((t) => (t.getAttribute("data-tab") || "") === "login");
-          if (tabLogin) tabLogin.classList.add("active");
-        }
-        setTimeout(() => {
-          const loginMsg = document.getElementById("login-msg");
-          _toastMsg(loginMsg, "注册成功！请使用新账号 " + (account || "") + " + 密码登录", "success");
-          try {
-            const u = document.getElementById("login-username");
-            if (u && account) { u.value = account; try { u.dispatchEvent(new Event("input", { bubbles:true })); } catch (_) {} try { u.focus(); } catch (_) {} }
-          } catch (_) {}
-        }, 280);
-      } catch (_) {}
-    };
-    const _showRegisterSuccessModal = (account) => {
-      _destroyRegisterSuccessModal();
-      const wrap = document.createElement("div");
-      wrap.id = "__reg_success_modal__";
-      wrap.setAttribute("data-reg-success-overlay", "1");
-      wrap.setAttribute("role", "dialog");
-      wrap.setAttribute("aria-modal", "true");
-      wrap.setAttribute("aria-labelledby", "__reg_success_title__");
-      wrap.style.cssText = [
-        "position:fixed","inset:0","z-index:2147483647",
-        "display:flex","align-items:center","justify-content:center",
-        "background:rgba(15,23,42,0.58)",
-        "-webkit-backdrop-filter:blur(4px)","backdrop-filter:blur(4px)",
-        "padding:20px","margin:0","border:none","outline:none","box-sizing:border-box",
-        "font-family:ui-sans-serif,system-ui,-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif",
-        "opacity:0","transition:opacity 180ms ease-out","animation:none"
-      ].join(" !important;") + " !important;";
-      const card = document.createElement("div");
-      card.setAttribute("data-reg-success-card", "1");
-      card.style.cssText = [
-        "position:relative","width:100%","max-width:420px",
-        "background:#ffffff","border-radius:20px",
-        "box-shadow:0 20px 60px rgba(15,23,42,0.28), 0 0 0 1px rgba(15,23,42,0.05)",
-        "padding:36px 28px 26px 28px","box-sizing:border-box","text-align:center",
-        "transform:translateY(8px) scale(0.98)","transition:transform 220ms cubic-bezier(.2,.8,.2,1),opacity 220ms ease-out",
-        "opacity:0","overflow:hidden","margin:0"
-      ].join(" !important;") + " !important;";
-      const topAccent = document.createElement("div");
-      topAccent.style.cssText = [
-        "position:absolute","top:0","left:0","right:0","height:4px",
-        "background:linear-gradient(90deg,#10b981 0%, #059669 50%, #047857 100%)"
-      ].join(" !important;") + " !important;";
-      const iconWrap = document.createElement("div");
-      iconWrap.style.cssText = [
-        "position:relative","width:84px","height:84px","margin:0 auto 20px auto",
-        "background:linear-gradient(135deg,rgba(16,185,129,0.16),rgba(16,185,129,0.06))",
-        "border:2px solid rgba(16,185,129,0.32)","border-radius:50%",
-        "display:flex","align-items:center","justify-content:center",
-        "box-shadow:0 10px 24px rgba(16,185,129,0.18)"
-      ].join(" !important;") + " !important;";
-      iconWrap.innerHTML = `<svg width="44" height="44" viewBox="0 0 24 24" fill="none" stroke="#059669" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 6 9 17l-5-5"/></svg>`;
-      const title = document.createElement("div");
-      title.id = "__reg_success_title__";
-      title.style.cssText = [
-        "font-size:24px","font-weight:800","line-height:1.3","letter-spacing:0.5px",
-        "color:#064e3b","margin:0 0 10px 0","text-align:center"
-      ].join(" !important;") + " !important;";
-      title.textContent = "注册成功！";
-      const desc = document.createElement("div");
-      desc.style.cssText = [
-        "font-size:14px","font-weight:600","line-height:1.7","letter-spacing:0.3px",
-        "color:#1f2937","margin:0 0 8px 0","text-align:center"
-      ].join(" !important;") + " !important;";
-      desc.textContent = "您的账号：";
-      const accBox = document.createElement("div");
-      accBox.style.cssText = [
-        "display:inline-block","padding:10px 18px","margin:4px auto 22px auto",
-        "background:rgba(16,185,129,0.10)","border:1px solid rgba(16,185,129,0.30)",
-        "color:#047857","border-radius:10px",
-        "font-size:18px","font-weight:800","letter-spacing:2px","line-height:1.4",
-        "font-family:'SF Mono',Menlo,Consolas,ui-monospace,monospace"
-      ].join(" !important;") + " !important;";
-      accBox.textContent = String(account || "");
-      const hint = document.createElement("div");
-      hint.style.cssText = [
-        "font-size:13px","line-height:1.6","letter-spacing:0.3px","color:#6b7280",
-        "margin:0 0 26px 0","text-align:center","font-weight:500"
-      ].join(" !important;") + " !important;";
-      hint.textContent = "现已为您创建账号，请使用该账号 + 注册时设置的密码登录";
-      const btns = document.createElement("div");
-      btns.style.cssText = [
-        "display:flex","flex-direction:row-reverse","gap:12px","align-items:center","justify-content:center",
-        "margin:0","padding:0"
-      ].join(" !important;") + " !important;";
-      const btnPrimary = document.createElement("button");
-      btnPrimary.type = "button";
-      btnPrimary.setAttribute("data-reg-success-btn", "primary");
-      btnPrimary.style.cssText = [
-        "flex:1","min-height:44px","border:none","outline:none","cursor:pointer",
-        "background:linear-gradient(180deg,#10b981,#059669)",
-        "color:#ffffff","font-size:15px","font-weight:700","letter-spacing:0.5px",
-        "border-radius:12px","padding:12px 18px","line-height:1.4",
-        "box-shadow:0 8px 18px rgba(16,185,129,0.32), inset 0 1px 0 rgba(255,255,255,0.18)",
-        "transition:transform 120ms ease-out, box-shadow 120ms ease-out, filter 120ms ease-out"
-      ].join(" !important;") + " !important;";
-      btnPrimary.textContent = "立即去登录";
-      const btnClose = document.createElement("button");
-      btnClose.type = "button";
-      btnClose.setAttribute("data-reg-success-btn", "close");
-      btnClose.style.cssText = [
-        "flex:1","min-height:44px","border:1px solid #e5e7eb","outline:none","cursor:pointer",
-        "background:#f9fafb",
-        "color:#374151","font-size:15px","font-weight:600","letter-spacing:0.3px",
-        "border-radius:12px","padding:12px 18px","line-height:1.4",
-        "transition:background 120ms ease-out, color 120ms ease-out"
-      ].join(" !important;") + " !important;";
-      btnClose.textContent = "知道了";
-      btns.appendChild(btnPrimary);
-      btns.appendChild(btnClose);
-      const countdown = document.createElement("div");
-      countdown.style.cssText = [
-        "margin-top:16px","font-size:12px","line-height:1.5","letter-spacing:0.3px",
-        "color:#9ca3af","text-align:center","font-weight:500"
-      ].join(" !important;") + " !important;";
-      countdown.textContent = "3.5 秒后自动关闭并跳转登录…";
-      card.appendChild(topAccent);
-      card.appendChild(iconWrap);
-      card.appendChild(title);
-      card.appendChild(desc);
-      const descBox = document.createElement("div"); descBox.style.margin = "0"; descBox.appendChild(desc);
-      card.appendChild(descBox);
-      card.appendChild(accBox);
-      card.appendChild(hint);
-      card.appendChild(btns);
-      card.appendChild(countdown);
-      wrap.appendChild(card);
-      (document.body || document.documentElement).appendChild(wrap);
-      try {
-        const y = document.body.scrollTop || document.documentElement.scrollTop || 0;
-        if (y > 0) window.scrollTo({ top: 0, behavior: "instant" in window ? "instant" : "auto" });
-      } catch (_) {}
-      requestAnimationFrame(() => {
-        try { wrap.style.opacity = "1"; } catch (_) {}
-        try {
-          card.style.transform = "translateY(0) scale(1)";
-          card.style.opacity = "1";
-        } catch (_) {}
-      });
-      let autoSec = 35;
-      const cdTick = () => {
-        if (!document.getElementById("__reg_success_modal__")) return;
-        autoSec -= 1;
-        if (autoSec <= 0) return;
-        try { countdown.textContent = ((autoSec / 10).toFixed(1)) + " 秒后自动关闭并跳转登录…"; } catch (_) {}
-      };
-      const cdTimer = setInterval(cdTick, 100);
-      const closeAndGo = () => {
-        try { clearInterval(cdTimer); } catch (_) {}
-        _destroyRegisterSuccessModal();
-        _afterRegModalClose(account || "");
-      };
-      const onKey = (e) => {
-        if (e.key === "Escape" || e.keyCode === 27) closeAndGo();
-      };
-      document.addEventListener("keydown", onKey, { once: true, passive: true, capture: false });
-      btnPrimary.addEventListener("click", (e) => { try { e.preventDefault(); e.stopPropagation(); } catch (_) {} closeAndGo(); }, { once: true, passive: false, capture: false });
-      btnClose.addEventListener("click", (e) => { try { e.preventDefault(); e.stopPropagation(); } catch (_) {} closeAndGo(); }, { once: true, passive: false, capture: false });
-      wrap.addEventListener("click", (e) => {
-        if (e.target === wrap || e.target && String(e.target.getAttribute && e.target.getAttribute("data-reg-success-overlay")) === "1") {
-          try { e.preventDefault(); e.stopPropagation(); } catch (_) {} closeAndGo();
-        }
-      }, { passive: false, capture: false });
-      try { btnPrimary.focus && btnPrimary.focus(); } catch (_) {}
-      _regSuccessModalTimer = setTimeout(() => {
-        try { clearInterval(cdTimer); } catch (_) {}
-        closeAndGo();
-      }, 3500);
+    const _getApiBase = () => {
+      const loc = window.location;
+      return loc.protocol + "//" + loc.host;
     };
 
-    // ========== 验证码加载与刷新 ==========
-    const _loadCaptcha = async () => {
-      if (!captchaImg || !refreshCaptchaBtn) return;
-      try {
-        refreshCaptchaBtn.disabled = true;
-        refreshCaptchaBtn.style.opacity = "0.5";
-        const res = await window.API.captcha();
-        if (res && res.code === 0 && res.data && res.data.image) {
-          captchaImg.src = res.data.image;
-          _currentCaptchaId = res.data.captcha_id || "";
-          if (captchaInput) captchaInput.value = "";
-        } else {
-          _toastMsg(msg, "验证码加载失败，请重试");
-        }
-      } catch (err) {
-        console.warn("[captcha] 加载失败", err);
-      } finally {
-        if (refreshCaptchaBtn) {
-          refreshCaptchaBtn.disabled = false;
-          refreshCaptchaBtn.style.opacity = "1";
-        }
+    const _doLogin = () => {
+      const username = userInput.value.trim();
+      const password = pwd.value.trim();
+      if (!username) {
+        _toastMsg(msg, "请输入账号", "error");
+        return;
       }
-    };
-    if (refreshCaptchaBtn) {
-      refreshCaptchaBtn.addEventListener("click", (e) => {
-        try { e.preventDefault(); } catch (_) {}
-        _loadCaptcha();
-      });
-    }
-    if (captchaImg) {
-      captchaImg.addEventListener("click", () => {
-        _loadCaptcha();
-      });
-    }
-    _loadCaptcha();
-
-    // ========== 密码可见性切换 ==========
-    if (eye && pwd) {
-      eye.addEventListener("click", function () {
-        const isHidden = pwd.type === "password";
-        pwd.type = isHidden ? "text" : "password";
-        const svg = eye.querySelector("svg");
-        if (svg) {
-          svg.innerHTML = isHidden
-            ? '<path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7S2 12 2 12z"/><circle cx="12" cy="12" r="3"/>'
-            : '<path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7S2 12 2 12z"/><circle cx="12" cy="12" r="3"/><line x1="3" y1="3" x2="21" y2="21" stroke-width="2"/>';
+      if (!password) {
+        _toastMsg(msg, "请输入密码", "error");
+        return;
+      }
+      btn.disabled = true;
+      try { btn.style.opacity = "0.6"; } catch (_) {}
+      _toastMsg(msg, "", "error");
+      fetch(_getApiBase() + "/api/auth/login", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ account_no: username, password: password })
+      }).then((r) => r.json()).then((res) => {
+        btn.disabled = false;
+        try { btn.style.opacity = "1"; } catch (_) {}
+        if (res.code === 0) {
+          _afterLogin(res);
+        } else {
+          _toastMsg(msg, res.msg || "登录失败", "error");
         }
+      }).catch((err) => {
+        btn.disabled = false;
+        try { btn.style.opacity = "1"; } catch (_) {}
+        _toastMsg(msg, "网络错误: " + (err.message || err), "error");
       });
-    }
+    };
 
-    // ========== 登录 ==========
-    let _loginSubmitting = false;
+    const _doRegister = () => {
+      const account = document.getElementById("reg-account").value.trim();
+      const password = document.getElementById("reg-password").value.trim();
+      const password2 = document.getElementById("reg-password2").value.trim();
+      const nickname = document.getElementById("reg-nickname").value.trim();
+      if (!account) {
+        _toastMsg(regMsg, "请输入账号", "error");
+        return;
+      }
+      if (!/^\d{6,11}$/.test(account)) {
+        _toastMsg(regMsg, "账号必须为6-11位数字", "error");
+        return;
+      }
+      if (!password) {
+        _toastMsg(regMsg, "请输入密码", "error");
+        return;
+      }
+      if (!/^\d{6,12}$/.test(password)) {
+        _toastMsg(regMsg, "密码必须为6-12位数字", "error");
+        return;
+      }
+      if (password !== password2) {
+        _toastMsg(regMsg, "两次输入的密码不一致", "error");
+        return;
+      }
+      regBtn.disabled = true;
+      try { regBtn.style.opacity = "0.6"; } catch (_) {}
+      _toastMsg(regMsg, "", "error");
+      fetch(_getApiBase() + "/api/auth/register", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ account_no: account, password: password, nickname: nickname })
+      }).then((r) => r.json()).then((res) => {
+        regBtn.disabled = false;
+        try { regBtn.style.opacity = "1"; } catch (_) {}
+        if (res.code === 0) {
+          _toastMsg(regMsg, "注册成功，请登录", "success");
+          setTimeout(() => {
+            document.querySelector(".lp-tab[data-tab='login']").click();
+          }, 1000);
+        } else {
+          _toastMsg(regMsg, res.msg || "注册失败", "error");
+        }
+      }).catch((err) => {
+        regBtn.disabled = false;
+        try { regBtn.style.opacity = "1"; } catch (_) {}
+        _toastMsg(regMsg, "网络错误: " + (err.message || err), "error");
+      });
+    };
+
     if (btn) {
-      btn.addEventListener("click", async function () {
-        if (_loginSubmitting) return;
-        _loginSubmitting = true;
-        try {
-        _toastMsg(msg, "");
-        const u = userInput ? userInput.value.trim() : "";
-        const p = pwd ? pwd.value.trim() : "";
-        const captchaCode = captchaInput ? captchaInput.value.trim() : "";
-        if (!u || !p) return _toastMsg(msg, "请输入账号和密码");
-        if (!(/^\d{6}$/.test(u) || /^1[3-9]\d{9}$/.test(u))) return _toastMsg(msg, "账号必须是 6 位数字或 11 位手机号");
-        if (!/^\d{6,12}$/.test(p)) return _toastMsg(msg, "密码必须是 6~12 位数字");
-        if (!window.API || !window.Router) return _toastMsg(msg, "系统初始化失败，请稍后重试");
-        try {
-          const res = await window.API.login(u, p, _currentCaptchaId, captchaCode);
-          if (res && res.code === 0) {
-            const emptyAll = ["login-username", "login-password", "login-captcha",
-                              "reg-account", "reg-password", "reg-password2", "reg-nickname"];
-            emptyAll.forEach((id) => {
-              const el = document.getElementById(id);
-              if (el) {
-                el.value = "";
-                try { el.removeAttribute("value"); } catch (_) {}
-                try { el.setAttribute("autocomplete", "off"); } catch (_) {}
-                try { el.dispatchEvent(new Event("input", { bubbles: true })); } catch (_) {}
-                try { el.dispatchEvent(new Event("change", { bubbles: true })); } catch (_) {}
-              }
-            });
-            try {
-              const allInputs = document.querySelectorAll(".lp-card-inner input");
-              allInputs.forEach((inp) => {
-                try { inp.removeAttribute("value"); inp.setAttribute("autocomplete", "off"); } catch (_) {}
-                if (inp.type !== "button" && inp.type !== "submit" && inp.type !== "hidden") {
-                  inp.value = "";
-                }
-              });
-              const f = document.querySelector(".lp-card-inner form");
-              if (f && typeof f.reset === "function") try { f.reset(); } catch (_) {}
-            } catch (_) {}
-            [document.getElementById("login-msg"), document.getElementById("reg-msg")].forEach((msgEl) => {
-              if (!msgEl) return;
-              msgEl.textContent = "";
-              msgEl.innerText = "";
-              msgEl.classList.remove("lp-error","lp-success");
-              msgEl.classList.add("lp-error");
-              try {
-                msgEl.style.color = "";
-                msgEl.removeAttribute("style");
-              } catch (_) {}
-            });
-            _afterLogin(res);
-          } else {
-            const err = (res && res.msg) || "登录失败";
-            _toastMsg(msg, err);
-          }
-        } catch (err) {
-          const errText = (err && (err.message || err.msg)) ? String(err.message || err.msg) : "请稍后重试";
-          _toastMsg(msg, "登录失败：" + errText.substring(0, 78));
-        }
-        } finally { _loginSubmitting = false; }
-      });
+      btn.addEventListener("click", _doLogin);
     }
+
     if (form) {
-      form.addEventListener("submit", function (e) {
+      form.addEventListener("submit", (e) => {
         e.preventDefault();
-        if (btn) btn.click();
+        _doLogin();
       });
     }
 
-    // ========== 注册 ==========
-    let _regSubmitting = false;
     if (regBtn) {
-      regBtn.addEventListener("click", async function () {
-        if (_regSubmitting) return;
-        _regSubmitting = true;
-        try {
-        _toastMsg(regMsg, "");
-        const no = document.getElementById("reg-account").value.trim();
-        const p1 = document.getElementById("reg-password").value.trim();
-        const p2 = document.getElementById("reg-password2").value.trim();
-        const nick = document.getElementById("reg-nickname").value.trim();
-        if (!(/^\d{6}$/.test(no) || /^1[3-9]\d{9}$/.test(no))) return _toastMsg(regMsg, "账号必须是 6 位数字或 11 位手机号");
-        if (!/^\d{6,12}$/.test(p1)) return _toastMsg(regMsg, "密码必须是 6~12 位数字");
-        if (p1 !== p2) return _toastMsg(regMsg, "两次输入的密码不一致");
-        if (!window.API) return _toastMsg(regMsg, "系统初始化失败");
-        try {
-          const res = await window.API.register(no, p1, nick);
-          if (res && res.code === 0) {
-            const account = res.data && res.data.account_no ? res.data.account_no : no;
-            _toastMsg(regMsg, "注册成功！账号：" + account + "，已为您弹出确认窗口", "success");
-            try {
-              if (typeof _showRegisterSuccessModal === "function") {
-                _showRegisterSuccessModal(no);
-              } else {
-                setTimeout(() => _afterRegModalClose(no), 2200);
-              }
-            } catch (_) {
-              setTimeout(() => _afterRegModalClose(no), 2200);
-            }
-          } else {
-            _toastMsg(regMsg, (res && res.msg) || "注册失败");
-          }
-        } catch (e) {
-          _toastMsg(regMsg, "注册失败");
-        }
-        } finally { _regSubmitting = false; }
+      regBtn.addEventListener("click", _doRegister);
+    }
+
+    if (eye && pwd) {
+      eye.addEventListener("click", () => {
+        const type = pwd.getAttribute("type") === "password" ? "text" : "password";
+        pwd.setAttribute("type", type);
+        try { eye.classList.toggle("fa-eye"); } catch (_) {}
+        try { eye.classList.toggle("fa-eye-slash"); } catch (_) {}
       });
     }
 
-    // ========== 全局 doLogout ==========
-    window.doLogout = async function () {
-      try {
-        if (window.API && typeof window.API.logout === "function") await window.API.logout();
-      } catch (_) {}
-      if (window.API && typeof window.API.clear === "function") window.API.clear();
-      else {
-        localStorage.removeItem(TOKEN_KEY);
-        localStorage.removeItem("userInfo");
-        localStorage.removeItem("account_app_user");
-      }
-      if (window.Router && typeof window.Router.go === "function") window.Router.go("#/login");
-      else location.hash = "#/login";
-    };
-    const logoutBtn = document.getElementById("logout-btn");
-    if (logoutBtn) logoutBtn.addEventListener("click", () => window.doLogout && window.doLogout());
+    if (pwd && userInput) {
+      userInput.addEventListener("keydown", (e) => {
+        if (e.key === "Enter") { pwd.focus(); }
+      });
+      pwd.addEventListener("keydown", (e) => {
+        if (e.key === "Enter") { _doLogin(); }
+      });
+    }
   });
 })();
