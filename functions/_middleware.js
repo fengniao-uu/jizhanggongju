@@ -513,7 +513,7 @@ async function generatePasswordHash(password) {
     keyMaterial,
     { name: 'HMAC', hash: 'SHA-256', length: 256 },
     false,
-    []
+    ['sign', 'verify']
   );
 
   const hash = await crypto.subtle.exportKey('raw', derivedKey);
@@ -552,7 +552,7 @@ async function verifyPassword(password, storedHash) {
     keyMaterial,
     { name: 'HMAC', hash: 'SHA-256', length: 256 },
     false,
-    []
+    ['sign', 'verify']
   );
 
   const hash = await crypto.subtle.exportKey('raw', derivedKey);
