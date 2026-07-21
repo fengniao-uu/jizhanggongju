@@ -1482,6 +1482,8 @@ async function handlePinAnnouncement(request, db, annId) {
   return jsonResponse(0, pinned ? '已置顶' : '已取消置顶');
 }
 
+
 async function handlePublicAnnouncements(db) {
-  const rows = await db.prepare(
-    "SELECT * FROM announcements
+  const rows = await db.prepare('SELECT * FROM announcements WHERE is_deleted = 0 AND is_active = 1 ORDER BY priority DESC, id DESC').all();
+  return jsonResponse(0, 'ok', rows.results || []);
+}
