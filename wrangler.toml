@@ -4,10 +4,6 @@ compatibility_date = "2025-07-21"
 compatibility_flags = ["nodejs_compat"]
 pages_build_output_dir = "."
 
-[site]
-bucket = "./"
-entry-point = "functions"
-
 [vars]
 JWT_SECRET = "dev_secret_change_me_in_production"
 ADMIN_DEFAULT_ACCOUNT = "100000"
