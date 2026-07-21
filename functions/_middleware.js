@@ -646,51 +646,11 @@ async function handleLoginWithDb(request, env, db) {
   await ensureAdminSeeded(db, env);
 
   const body = await request.json();
-  const { account_no, password, captcha_id, captcha_code } = body;
+  const account_no = body.account_no || '';
+  const password = body.password || '';
 
   if (!account_no || !password) {
     return jsonResponse(400, '账号或密码不能为空');
-  }
-
-  if (!/^\d{6,11}$/.test(account_no)) {
-    return jsonResponse(400, '账号必须为6-11位数字');
-  }
-
-  if (!/^\d{6,12}$/.test(password)) {
-    return jsonResponse(400, '密码必须为6-12位数字');
-  }
-
-  if (!captcha_id || !captcha_code) {
-    return jsonResponse(400, '请输入验证码', { captcha_required: true });
-  }
-
-  const captcha = await db.prepare('SELECT code_hash, salt, used, expires_at FROM captcha_store WHERE id = ? LIMIT 1').bind(captcha_id).first();
-  console.log('Captcha lookup:', captcha_id, captcha ? 'found' : 'not found');
-  
-  if (!captcha) {
-    return jsonResponse(400, '验证码不存在，请点击刷新', { captcha_required: true });
-  }
-  
-  if (captcha.used) {
-    return jsonResponse(400, '验证码已被使用，请点击刷新', { captcha_required: true });
-  }
-  
-  if (captcha.expires_at && new Date(captcha.expires_at) < new Date()) {
-    await db.prepare('DELETE FROM captcha_store WHERE id = ?').bind(captcha_id).run();
-    return jsonResponse(400, '验证码已过期，请点击刷新', { captcha_required: true });
-  }
-
-  const encoder = new TextEncoder();
-  const hashData = encoder.encode(captcha.salt + captcha_code.toUpperCase());
-  const hash = await crypto.subtle.digest('SHA-256', hashData);
-  const inputHash = Array.from(new Uint8Array(hash)).map(b => b.toString(16).padStart(2, '0')).join('');
-
-  console.log('Captcha verification:', captcha_code.toUpperCase(), captcha.salt, inputHash === captcha.code_hash ? 'success' : 'failed');
-
-  await db.prepare('UPDATE captcha_store SET used = 1 WHERE id = ?').bind(captcha_id).run();
-
-  if (inputHash !== captcha.code_hash) {
-    return jsonResponse(400, '验证码错误，请重新输入', { captcha_required: true });
   }
 
   const user = await db.prepare('SELECT * FROM users WHERE account_no = ? AND is_deleted = 0 LIMIT 1').bind(account_no).first();
@@ -703,14 +663,13 @@ async function handleLoginWithDb(request, env, db) {
     return jsonResponse(400, '账号已被禁用');
   }
 
-  if (user.locked_until && new Date(user.locked_until) > new Date()) {
-    const remain = Math.ceil((new Date(user.locked_until) - new Date()) / 1000);
-    return jsonResponse(400, `账号已锁定，请 ${Math.ceil(remain / 60)} 分钟后再试`);
+  const now = new Date();
+  if (user.locked_until && new Date(user.locked_until) > now) {
+    const remaining = Math.ceil((new Date(user.locked_until) - now) / 1000 / 60);
+    return jsonResponse(400, '账号已锁定，请 ' + remaining + ' 分钟后再试');
   }
 
-  console.log('Password verification attempt:', account_no, user.password_hash.substring(0, 30) + '...');
   const isPasswordValid = await verifyPassword(password, user.password_hash);
-  console.log('Password verification result:', isPasswordValid);
 
   if (!isPasswordValid) {
     const failedAttempts = (user.failed_attempts || 0) + 1;
@@ -718,45 +677,39 @@ async function handleLoginWithDb(request, env, db) {
     const lockMinutes = parseInt(env.LOGIN_LOCK_MINUTES || '30');
 
     if (failedAttempts >= maxAttempts) {
-      await db.prepare(
-        'UPDATE users SET failed_attempts = ?, last_failed_at = datetime(\'now\'), locked_until = datetime(\'now\', ?) WHERE id = ?'
-      ).bind(failedAttempts, `+${lockMinutes} minutes`, user.id).run();
-      return jsonResponse(400, `密码错误次数过多，账号已锁定 ${lockMinutes} 分钟`);
-    } else {
-      await db.prepare(
-        'UPDATE users SET failed_attempts = ?, last_failed_at = datetime(\'now\') WHERE id = ?'
-      ).bind(failedAttempts, user.id).run();
-      return jsonResponse(400, `账号或密码错误，还剩 ${maxAttempts - failedAttempts} 次机会`);
+      const lockUntil = new Date(now.getTime() + lockMinutes * 60 * 1000);
+      await db.prepare('UPDATE users SET failed_attempts = ?, locked_until = ? WHERE id = ?').bind(failedAttempts, lockUntil.toISOString(), user.id).run();
+      await db.prepare('INSERT INTO session_logs(user_id, ip, user_agent, jti, is_success, fail_reason, attempt_account) VALUES(?, ?, ?, ?, 0, ?, ?)').bind(user.id, '', '', crypto.randomUUID(), 'password_lock', account_no).run();
+      return jsonResponse(400, '密码错误次数过多，账号已锁定');
     }
+
+    await db.prepare('UPDATE users SET failed_attempts = ?, last_failed_at = ? WHERE id = ?').bind(failedAttempts, now.toISOString(), user.id).run();
+    await db.prepare('INSERT INTO session_logs(user_id, ip, user_agent, jti, is_success, fail_reason, attempt_account) VALUES(?, ?, ?, ?, 0, ?, ?)').bind(user.id, '', '', crypto.randomUUID(), 'password_wrong', account_no).run();
+    return jsonResponse(400, '账号或密码错误');
   }
 
-  await db.prepare('UPDATE users SET failed_attempts = 0, locked_until = NULL, last_login_at = datetime(\'now\') WHERE id = ?').bind(user.id).run();
+  await db.prepare('UPDATE users SET failed_attempts = 0, locked_until = NULL, last_login_at = CURRENT_TIMESTAMP WHERE id = ?').bind(user.id).run();
 
   const jti = Array.from(crypto.getRandomValues(new Uint8Array(16))).map(b => b.toString(16).padStart(2, '0')).join('');
 
-  await db.prepare(
-    'INSERT INTO session_logs(user_id, jti, ip, user_agent, is_success) VALUES(?, ?, ?, ?, 1)'
-  ).bind(user.id, jti, request.headers.get('CF-Connecting-IP') || '', request.headers.get('User-Agent') || '').run();
+  await db.prepare('INSERT INTO session_logs(user_id, ip, user_agent, jti, is_success, attempt_account) VALUES(?, ?, ?, ?, 1, ?)').bind(user.id, '', '', jti, account_no).run();
 
-  const token = await generateJwt({ id: user.id, account_no: user.account_no, role: user.role, jti }, env);
-  const userInfo = await getUserInfo(db, { id: user.id });
+  const token = await generateToken(user.id, jti);
 
   return jsonResponse(0, '登录成功', {
-    token,
-    user: userInfo,
-    userInfo,
-    account_no: user.account_no,
-    user_id: user.id,
-    expires_at: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString(),
-    security: {
-      default_admin_account: '100000',
-      need_change_default_pwd: user.account_no === '100000' && password === (env.ADMIN_DEFAULT_PASSWORD || '123456'),
-      warn_default_credentials: user.account_no === '100000' && password === (env.ADMIN_DEFAULT_PASSWORD || '123456'),
-      warn_tags: [],
+    token: token,
+    user: {
+      id: user.id,
+      account_no: user.account_no,
+      nickname: user.nickname,
+      phone: user.phone,
+      role: user.role,
+      is_active: user.is_active,
+      created_at: user.created_at,
+      last_login_at: user.last_login_at,
     },
   });
 }
-
 async function handleRegisterWithDb(request, env, db) {
   await initDbSchema(db);
 
