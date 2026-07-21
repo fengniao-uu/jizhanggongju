@@ -583,22 +583,29 @@ async function generateCaptcha() {
 }
 
 async function handleCaptcha(db) {
-  const { captchaId, code, codeHash, salt, expiresAt } = await generateCaptcha();
+  try {
+    const { captchaId, code, codeHash, salt, expiresAt } = await generateCaptcha();
 
-  await db.prepare('DELETE FROM captcha_store WHERE expires_at < datetime(\'now\') LIMIT 100').run();
+    await db.prepare('DELETE FROM captcha_store WHERE expires_at < datetime(\'now\') LIMIT 100').run();
 
-  await db.prepare(
-    'INSERT INTO captcha_store(id, code_hash, salt, expires_at) VALUES(?, ?, ?, ?)'
-  ).bind(captchaId, codeHash, salt, expiresAt.toISOString()).run();
+    await db.prepare(
+      'INSERT INTO captcha_store(id, code_hash, salt, expires_at) VALUES(?, ?, ?, ?)'
+    ).bind(captchaId, codeHash, salt, expiresAt.toISOString()).run();
 
-  const svg = generateCaptchaSvg(code);
+    const svg = generateCaptchaSvg(code);
+    const encoder = new TextEncoder();
+    const base64 = btoa(String.fromCharCode(...encoder.encode(svg)));
 
-  return jsonResponse(0, 'ok', {
-    captcha_id: captchaId,
-    image: 'data:image/svg+xml;base64,' + btoa(svg),
-    ttl: 300,
-    disabled: false,
-  });
+    return jsonResponse(0, 'ok', {
+      captcha_id: captchaId,
+      image: 'data:image/svg+xml;base64,' + base64,
+      ttl: 300,
+      disabled: false,
+    });
+  } catch (error) {
+    console.error('Captcha Error:', error);
+    return jsonResponse(500, '验证码生成失败: ' + error.message);
+  }
 }
 
 function generateCaptchaSvg(code) {
