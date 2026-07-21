@@ -134,6 +134,11 @@ async function handleApiRequestWithDb(request, env, path) {
   const method = request.method;
   const db = env.DB;
 
+  if (!db) {
+    console.error('D1 Database binding not found!');
+    return jsonResponse(500, '数据库未配置，请检查Cloudflare Pages的D1数据库绑定');
+  }
+
   if (method === 'OPTIONS') {
     return new Response(null, {
       status: 204,
