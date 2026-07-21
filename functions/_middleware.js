@@ -500,10 +500,10 @@ async function generatePasswordHash(password) {
     encoder.encode(password),
     { name: 'PBKDF2' },
     false,
-    ['deriveKey']
+    ['deriveBits']
   );
 
-  const derivedKey = await crypto.subtle.deriveKey(
+  const hash = await crypto.subtle.deriveBits(
     {
       name: 'PBKDF2',
       salt: salt,
@@ -511,16 +511,13 @@ async function generatePasswordHash(password) {
       hash: 'SHA-256',
     },
     keyMaterial,
-    { name: 'HMAC', hash: 'SHA-256', length: 256 },
-    false,
-    ['sign', 'verify']
+    256
   );
 
-  const hash = await crypto.subtle.exportKey('raw', derivedKey);
   const hashHex = Array.from(new Uint8Array(hash)).map(b => b.toString(16).padStart(2, '0')).join('');
   const saltHex = Array.from(salt).map(b => b.toString(16).padStart(2, '0')).join('');
 
-  return `pbkdf2:sha256:${iterations}$${saltHex}$${hashHex}`;
+  return pbkdf2:sha256:{saltHex}{hashHex};
 }
 
 async function verifyPassword(password, storedHash) {
@@ -539,10 +536,10 @@ async function verifyPassword(password, storedHash) {
     encoder.encode(password),
     { name: 'PBKDF2' },
     false,
-    ['deriveKey']
+    ['deriveBits']
   );
 
-  const derivedKey = await crypto.subtle.deriveKey(
+  const hash = await crypto.subtle.deriveBits(
     {
       name: 'PBKDF2',
       salt: salt,
@@ -550,12 +547,9 @@ async function verifyPassword(password, storedHash) {
       hash: 'SHA-256',
     },
     keyMaterial,
-    { name: 'HMAC', hash: 'SHA-256', length: 256 },
-    false,
-    ['sign', 'verify']
+    256
   );
 
-  const hash = await crypto.subtle.exportKey('raw', derivedKey);
   const computedHashHex = Array.from(new Uint8Array(hash)).map(b => b.toString(16).padStart(2, '0')).join('');
 
   return computedHashHex === hashHex;
