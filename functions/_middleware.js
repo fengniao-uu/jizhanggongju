@@ -17,7 +17,7 @@ export async function onRequest(context) {
   }
 
   try {
-    return await handleApiRequest(request, env, path);
+    return await handleApiRequestWithDb(request, env, path);
   } catch (error) {
     console.error('API Error:', error);
     return jsonResponse(500, '服务器错误: ' + error.message);
