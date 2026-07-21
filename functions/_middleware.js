@@ -586,16 +586,17 @@ async function handleCaptcha(db) {
   try {
     const { captchaId, code, codeHash, salt, expiresAt } = await generateCaptcha();
 
-    await db.prepare('DELETE FROM captcha_store WHERE expires_at < datetime(\'now\') LIMIT 100').run();
+    await db.prepare('DELETE FROM captcha_store WHERE expires_at < CURRENT_TIMESTAMP LIMIT 100').run();
 
     await db.prepare(
-      'INSERT INTO captcha_store(id, code_hash, salt, expires_at) VALUES(?, ?, ?, ?)'
+      'INSERT INTO captcha_store(id, code_hash, salt, expires_at, used) VALUES(?, ?, ?, ?, 0)'
     ).bind(captchaId, codeHash, salt, expiresAt.toISOString()).run();
 
     const svg = generateCaptchaSvg(code);
     const encoder = new TextEncoder();
     const base64 = btoa(String.fromCharCode(...encoder.encode(svg)));
 
+    console.log('Captcha generated:', captchaId, code);
     return jsonResponse(0, 'ok', {
       captcha_id: captchaId,
       image: 'data:image/svg+xml;base64,' + base64,
@@ -671,9 +672,16 @@ async function handleLoginWithDb(request, env, db) {
   }
 
   const captcha = await db.prepare('SELECT code_hash, salt, used, expires_at FROM captcha_store WHERE id = ? LIMIT 1').bind(captcha_id).first();
-  if (!captcha || captcha.used) {
-    return jsonResponse(400, '验证码已过期或不存在', { captcha_required: true });
+  console.log('Captcha lookup:', captcha_id, captcha ? 'found' : 'not found');
+  
+  if (!captcha) {
+    return jsonResponse(400, '验证码不存在，请点击刷新', { captcha_required: true });
   }
+  
+  if (captcha.used) {
+    return jsonResponse(400, '验证码已被使用，请点击刷新', { captcha_required: true });
+  }
+  
   if (captcha.expires_at && new Date(captcha.expires_at) < new Date()) {
     await db.prepare('DELETE FROM captcha_store WHERE id = ?').bind(captcha_id).run();
     return jsonResponse(400, '验证码已过期，请点击刷新', { captcha_required: true });
@@ -683,6 +691,8 @@ async function handleLoginWithDb(request, env, db) {
   const hashData = encoder.encode(captcha.salt + captcha_code.toUpperCase());
   const hash = await crypto.subtle.digest('SHA-256', hashData);
   const inputHash = Array.from(new Uint8Array(hash)).map(b => b.toString(16).padStart(2, '0')).join('');
+
+  console.log('Captcha verification:', captcha_code.toUpperCase(), captcha.salt, inputHash === captcha.code_hash ? 'success' : 'failed');
 
   await db.prepare('UPDATE captcha_store SET used = 1 WHERE id = ?').bind(captcha_id).run();
 
@@ -705,7 +715,9 @@ async function handleLoginWithDb(request, env, db) {
     return jsonResponse(400, `账号已锁定，请 ${Math.ceil(remain / 60)} 分钟后再试`);
   }
 
+  console.log('Password verification attempt:', account_no, user.password_hash.substring(0, 30) + '...');
   const isPasswordValid = await verifyPassword(password, user.password_hash);
+  console.log('Password verification result:', isPasswordValid);
 
   if (!isPasswordValid) {
     const failedAttempts = (user.failed_attempts || 0) + 1;
