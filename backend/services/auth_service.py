@@ -7,7 +7,7 @@ from werkzeug.security import check_password_hash, generate_password_hash
 
 import config
 from db import get_adapter
-from utils.validators import is_6digit, is_valid_password
+from utils.validators import is_6digit, is_valid_password, is_phone
 
 
 def _pbkdf2(pwd: str) -> str:
@@ -45,21 +45,82 @@ class AuthService:
 
     @staticmethod
     def register(account_no: Any, password: Any, nickname: Any = "", ip: str = "", ua: str = "") -> Dict:
-        if not is_6digit(account_no):
-            return AuthService._fail("账号必须是 6 位数字", 400)
         if not is_valid_password(password):
             return AuthService._fail("密码必须是 6~12 位数字", 400)
         account = str(account_no).strip()
-        if get_adapter().get_user_by_account(account) is not None:
-            return AuthService._fail("该 6 位账号已被占用，请换一个", 409)
+        use_phone = is_phone(account)
+        phone = ""
+        if use_phone:
+            phone = account
+            import random
+            while True:
+                new_account = str(random.randint(100000, 999999))
+                if get_adapter().get_user_by_account(new_account) is None:
+                    account = new_account
+                    break
+        else:
+            if not is_6digit(account):
+                return AuthService._fail("账号必须是 6 位数字或 11 位手机号", 400)
+            if get_adapter().get_user_by_account(account) is not None:
+                return AuthService._fail("该 6 位账号已被占用，请换一个", 409)
         pwd_hash = _pbkdf2(str(password).strip())
         nick = str(nickname or "")[:32]
-        # 🔒 安全：注册通道只允许创建 ROLE_USER（普通用户），避免越权注册成管理员
-        user_id = get_adapter().create_user(account, pwd_hash, role=int(getattr(config, "ROLE_USER", 0)), nickname=nick)
-        get_adapter().upsert_system_categories_for_user(user_id)
-        token, exp, jti = _issue_jwt(user_id, role=int(getattr(config, "ROLE_USER", 0)))
-        get_adapter().insert_session_log(user_id, jti, ip, ua)
-        get_adapter().update_user_last_login(user_id)
+        adapter = get_adapter()
+        user_id = None
+        try:
+            user_id = adapter.create_user(account, pwd_hash, role=int(getattr(config, "ROLE_USER", 0)), nickname=nick, phone=phone)
+        except Exception as e:
+            # 捕获唯一约束冲突（并发/竞态/fallback 重复请求），不再抛 500，返回友好 409
+            name = type(e).__name__.lower()
+            msg = str(e).lower()
+            is_unique_conflict = (
+                "integrityerror" in name
+                or "databaseerror" in name
+                or "unique" in name
+                or "duplicate" in name
+                or "unique" in msg
+                or "duplicate" in msg
+                or "constraint" in msg
+            )
+            is_account_taken = False
+            try:
+                if is_unique_conflict and adapter.get_user_by_account(account) is not None:
+                    is_account_taken = True
+            except Exception:
+                pass
+            if is_account_taken or ("account_no" in msg):
+                return AuthService._fail("该 6 位账号已被占用，请换一个", 409)
+            if is_unique_conflict:
+                return AuthService._fail("注册失败：数据冲突，请换一个账号重试", 409)
+            return AuthService._fail("注册失败：服务繁忙请稍后重试", 500)
+        try:
+            adapter.upsert_system_categories_for_user(user_id)
+            token, exp, jti = _issue_jwt(user_id, role=int(getattr(config, "ROLE_USER", 0)))
+            adapter.insert_session_log(user_id, jti, ip, ua)
+            adapter.update_user_last_login(user_id)
+        except Exception as e:
+            name = type(e).__name__.lower()
+            msg = str(e).lower()
+            is_unique_conflict = (
+                "integrityerror" in name
+                or "databaseerror" in name
+                or "unique" in name
+                or "duplicate" in name
+                or "unique" in msg
+                or "duplicate" in msg
+                or "constraint" in msg
+            )
+            account_still_taken = False
+            try:
+                if is_unique_conflict and adapter.get_user_by_account(account) is not None:
+                    account_still_taken = True
+            except Exception:
+                pass
+            if account_still_taken or ("account_no" in msg):
+                return AuthService._fail("该 6 位账号已被占用，请换一个", 409)
+            if is_unique_conflict:
+                return AuthService._fail("注册失败：数据冲突，请稍后重试", 409)
+            return AuthService._fail("注册失败：服务繁忙请稍后重试", 500)
         role_i = int(getattr(config, "ROLE_USER", 0))
         return AuthService._ok(
             {
@@ -83,14 +144,20 @@ class AuthService:
 
     @staticmethod
     def login(account_no: Any, password: Any, ip: str = "", ua: str = "") -> Dict:
-        if not is_6digit(account_no) or not is_valid_password(password):
-            return AuthService._fail("账号必须是 6 位数字，密码必须是 6~12 位数字", 400)
+        if not is_valid_password(password):
+            return AuthService._fail("密码必须是 6~12 位数字", 400)
         account = str(account_no).strip()
         pwd = str(password).strip()
         adapter = get_adapter()
 
-        # 🔒 前置：账号是否锁定（含剩余时间）
-        lk, lk_until, failed_so_far, remain = adapter.check_login_lock_status(account_no=account)
+        use_phone = is_phone(account)
+        lookup_account = account
+        if use_phone:
+            user_by_phone = adapter.get_user_by_phone(account)
+            if user_by_phone:
+                lookup_account = user_by_phone.get("account_no", account)
+
+        lk, lk_until, failed_so_far, remain = adapter.check_login_lock_status(account_no=lookup_account)
         if lk:
             adapter.insert_session_log(
                 user_id=0, jti="", ip=ip, ua=ua,
@@ -105,13 +172,15 @@ class AuthService:
                 tip = f"账号已临时锁定，请 {mins}分{secs:02d}秒 后重试（累计失败 {failed_so_far} 次）"
             return AuthService._fail(tip, 429, {"locked_until": lk_until, "remain_seconds": remain, "failed_attempts": failed_so_far, "permanent_locked": is_permanent})
 
-        user = adapter.get_user_by_account(account)
+        user = adapter.get_user_by_account(lookup_account)
+        if not user:
+            if use_phone:
+                user = adapter.get_user_by_phone(account)
         if not user:
             adapter.insert_session_log(
                 user_id=0, jti="", ip=ip, ua=ua,
                 is_success=False, fail_reason="not_found", attempt_account=account,
             )
-            # 账号不存在也算失败（防止枚举 + 让存在的账号也一样的提示，同时按 account_no 记计数，没有 user_id 就不计数
             return AuthService._fail("账号或密码错误", 401, {"hint": "统一返回，避免账号枚举"})
         user_id = int(user["id"])
 

@@ -6,18 +6,28 @@ import uuid
 from datetime import datetime
 from pathlib import Path
 
-from flask import Flask, jsonify, request, send_from_directory, send_file
+from flask import Flask, jsonify, request, send_file
 from flask_cors import CORS
 
 import config  # noqa: E402  需要在 system_health 之前可用
 from config import CORS_ORIGINS, JWT_SECRET, APP_VERSION, LOG_DIR
 
-# 前端静态文件目录
 FRONTEND_DIR = Path(__file__).resolve().parent.parent / "frontend"
 
 from init_db import ensure_db_initialized
 
-ensure_db_initialized()
+_db_initialized = False
+
+def ensure_db_lazy():
+    global _db_initialized
+    if not _db_initialized:
+        try:
+            ensure_db_initialized()
+            _db_initialized = True
+        except Exception as e:
+            import logging
+            logging.getLogger("app").error(f"Database init failed: {e}")
+            raise
 
 app = Flask(__name__, static_folder=None)
 app.config["JWT_SECRET"] = JWT_SECRET
@@ -29,18 +39,33 @@ if CORS_ORIGINS and CORS_ORIGINS != ["*"]:
 else:
     CORS(app, resources={r"/api/*": {"origins": "*"}}, supports_credentials=True)
 
-os.makedirs(LOG_DIR, exist_ok=True)
+IS_CF = any(
+    k in os.environ for k in ("CF_PAGES", "CF_WORKER", "CLOUDFLARE_WORKER", "CF_PAGES_COMMIT_SHA")
+) or os.environ.get("WORKER_RUNTIME", "") == "cloudflare"
+
+try:
+    if not IS_CF:
+        os.makedirs(LOG_DIR, exist_ok=True)
+except Exception:
+    pass
+
 today_str = datetime.now().strftime("%Y%m%d")
-file_handler = logging.FileHandler(Path(LOG_DIR) / f"app-{today_str}.log", encoding="utf-8")
-file_handler.setLevel(logging.INFO)
-file_handler.setFormatter(logging.Formatter("%(asctime)s %(levelname)s | %(message)s"))
-console_handler = logging.StreamHandler(sys.stdout)
-console_handler.setLevel(logging.INFO)
-console_handler.setFormatter(logging.Formatter("%(asctime)s %(levelname)s | %(message)s"))
 logger = logging.getLogger("app")
 logger.setLevel(logging.INFO)
-logger.addHandler(file_handler)
-logger.addHandler(console_handler)
+if not logger.handlers:
+    if not IS_CF:
+        try:
+            log_path = Path(LOG_DIR) / f"app-{today_str}.log"
+            file_handler = logging.FileHandler(str(log_path), encoding="utf-8")
+            file_handler.setLevel(logging.INFO)
+            file_handler.setFormatter(logging.Formatter("%(asctime)s %(levelname)s | %(message)s"))
+            logger.addHandler(file_handler)
+        except Exception:
+            pass
+    console_handler = logging.StreamHandler(sys.stdout)
+    console_handler.setLevel(logging.INFO)
+    console_handler.setFormatter(logging.Formatter("%(asctime)s %(levelname)s | %(message)s"))
+    logger.addHandler(console_handler)
 app.logger.handlers = logger.handlers
 app.logger.setLevel(logging.INFO)
 
@@ -88,14 +113,30 @@ except Exception:
     pass
 
 
+@app.before_request
+def _before_request():
+    if request.path.startswith("/api/"):
+        ensure_db_lazy()
+
+
 @app.get("/api/system/health")
 def system_health():
+    try:
+        ensure_db_lazy()
+        from db import get_adapter
+        adapter = get_adapter()
+        db_ok = True
+    except Exception as e:
+        db_ok = False
+        db_error = str(e)[:100]
+    
     return jsonify(
         {
             "code": 0,
             "msg": "ok",
             "data": {
-                "db_exists": Path(config.DB_PATH).exists(),
+                "db_exists": db_ok,
+                "db_error": "" if db_ok else db_error,
                 "version": APP_VERSION,
                 "db_adapter": config.DB_ADAPTER,
                 "time": datetime.now().isoformat(timespec="seconds"),
@@ -141,10 +182,6 @@ def public_announcements():
     return jsonify({"code": 0, "msg": "ok", "data": {"list": safe, "server_time": datetime.now().strftime("%Y-%m-%d %H:%M:%S")}})
 
 
-# ==================== 静态文件服务（前后端一体化） ====================
-# 完全禁用 Flask 内置 static_folder，全部手动处理
-# SPA 使用 hash 路由（#/dashboard/home），无需服务端全路径兜底
-
 @app.route("/")
 def _serve_index():
     return send_file(str(FRONTEND_DIR / "index.html"))
@@ -152,14 +189,11 @@ def _serve_index():
 
 @app.route("/<path:filename>")
 def _serve_static_file(filename):
-    """手动托管 frontend 目录下的静态文件（css/js/images）。"""
     target = (FRONTEND_DIR / filename).resolve()
-    # 安全检查：防止路径遍历
     if not str(target).startswith(str(FRONTEND_DIR.resolve())):
         return jsonify({"code": 403, "msg": "禁止访问", "data": None}), 403
     if target.is_file():
         return send_file(str(target))
-    # 文件不存在时返回 404
     return jsonify({"code": 404, "msg": "资源不存在", "data": {"path": filename}}), 404
 
 

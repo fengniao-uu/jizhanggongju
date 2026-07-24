@@ -1,0 +1,31 @@
+services:
+  - type: web
+    name: jizhang-api
+    env: python
+    plan: starter
+    buildCommand: pip install -r backend/requirements.txt
+    startCommand: gunicorn backend.app:app
+    envVars:
+      - key: PYTHON_VERSION
+        value: 3.12.0
+      - key: DATABASE_URL
+        fromEnv: DATABASE_URL
+      - key: DB_ADAPTER
+        value: postgres
+      - key: JWT_SECRET
+        generateValue: true
+      - key: ADMIN_PASSWORD
+        value: admin123
+      - key: CORS_ORIGINS
+        value: "*"
+
+static_sites:
+  - type: static_site
+    name: jizhang-frontend
+    buildCommand: ""
+    publishDir: frontend
+    envVars:
+      - key: API_BASE_URL
+        fromService:
+          name: jizhang-api
+          type: web

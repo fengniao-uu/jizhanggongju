@@ -1,20 +1,60 @@
 import os
 import secrets
 import logging
+import tempfile
 from pathlib import Path
-from dotenv import load_dotenv, set_key
 
 _BASE_DIR = Path(__file__).resolve().parent
 _ENV_PATH = _BASE_DIR / ".env"
 
-load_dotenv(_ENV_PATH)
+IS_CF_WORKERS = any(
+    k in os.environ for k in ("CF_PAGES", "CF_WORKER", "CLOUDFLARE_WORKER", "CF_PAGES_COMMIT_SHA")
+) or os.environ.get("WORKER_RUNTIME", "") == "cloudflare"
+
+try:
+    from dotenv import load_dotenv, set_key
+    _DOTENV_OK = True
+except ImportError:
+    _DOTENV_OK = False
+    def load_dotenv(*a, **k): pass
+    def set_key(*a, **k): raise OSError("python-dotenv 未安装")
+
+if not IS_CF_WORKERS and _DOTENV_OK:
+    try:
+        load_dotenv(_ENV_PATH)
+    except Exception:
+        pass
 
 BASE_DIR = _BASE_DIR
-DATA_DIR = BASE_DIR / "data"
-LOG_DIR = BASE_DIR / "logs"
-DB_PATH = DATA_DIR / "app.db"
-DATA_DIR.mkdir(exist_ok=True)
-LOG_DIR.mkdir(exist_ok=True)
+if IS_CF_WORKERS:
+    try:
+        DATA_DIR = Path(tempfile.gettempdir()) / "jz_data"
+        LOG_DIR = Path(tempfile.gettempdir()) / "jz_logs"
+    except Exception:
+        DATA_DIR = Path("/tmp") / "jz_data"
+        LOG_DIR = Path("/tmp") / "jz_logs"
+    try:
+        DATA_DIR.mkdir(parents=True, exist_ok=True)
+    except Exception:
+        pass
+    try:
+        LOG_DIR.mkdir(parents=True, exist_ok=True)
+    except Exception:
+        pass
+    DB_PATH = DATA_DIR / "app.db"
+    try:
+        Path(DB_PATH).touch(exist_ok=True)
+    except Exception:
+        pass
+else:
+    DATA_DIR = BASE_DIR / "data"
+    LOG_DIR = BASE_DIR / "logs"
+    DB_PATH = DATA_DIR / "app.db"
+    try:
+        DATA_DIR.mkdir(exist_ok=True)
+        LOG_DIR.mkdir(exist_ok=True)
+    except Exception:
+        pass
 
 _cfg_logger = logging.getLogger("config")
 if not _cfg_logger.handlers:
@@ -40,16 +80,34 @@ def _ensure_jwt_secret() -> str:
     while len(new_secret) < 64:
         new_secret = secrets.token_urlsafe(48)
     new_secret = new_secret[:64]
-    try:
-        if not _ENV_PATH.exists():
-            _ENV_PATH.touch(mode=0o600, exist_ok=True)
-        set_key(str(_ENV_PATH), "JWT_SECRET", new_secret, quote_mode="never")
-    except Exception as e:
-        _cfg_logger.warning("JWT_SECRET generated but failed to persist to .env: %s", e)
+    saved_hint = ""
+    if not IS_CF_WORKERS and _DOTENV_OK:
+        try:
+            if not _ENV_PATH.exists():
+                try:
+                    _ENV_PATH.touch(mode=0o600, exist_ok=True)
+                except Exception:
+                    pass
+            try:
+                set_key(str(_ENV_PATH), "JWT_SECRET", new_secret, quote_mode="never")
+                saved_hint = f" & saved to .env ({_ENV_PATH.name})"
+            except Exception as e:
+                _cfg_logger.warning("JWT_SECRET generated but failed to persist to .env: %s", e)
+        except Exception:
+            pass
+    else:
+        _cfg_logger.warning(
+            "="*68 + "\n" +
+            "[严重警告] Cloudflare 环境未设置持久化 JWT_SECRET！当前生成的随机密钥仅本次冷启动有效，"
+            "下次部署/冷启动后所有已登录用户的 Token 将全部失效。请立刻在 Cloudflare Pages 项目后台的 "
+            "Environment Variables 中添加一个 >=32 位的高熵 JWT_SECRET 环境变量，然后重新部署。\n" +
+            "="*68
+        )
+        saved_hint = "（临时密钥，冷启动后会变化！请设置环境变量）"
     _cfg_logger.info(
         "JWT_SECRET auto-generated (CSPRNG, len=%d, entropy~384bits)%s",
         len(new_secret),
-        f" & saved to .env ({_ENV_PATH.name})" if _ENV_PATH.exists() else "",
+        saved_hint,
     )
     os.environ["JWT_SECRET"] = new_secret
     return new_secret
@@ -61,7 +119,11 @@ JWT_EXPIRE_DAYS = 7
 PBKDF2_ITERATIONS = 260000
 CORS_ORIGINS = [x.strip() for x in os.getenv("CORS_ORIGINS", "*").split(",") if x.strip()]
 
-DB_ADAPTER = os.getenv("DB_ADAPTER", "sqlite").lower()
+DATABASE_URL = (os.getenv("DATABASE_URL") or os.getenv("POSTGRES_URL") or os.getenv("POSTGRESQL_URL") or "").strip()
+if DATABASE_URL.startswith("postgres://"):
+    DATABASE_URL = "postgresql://" + DATABASE_URL[len("postgres://"):]
+_DB_FROM_ENV = "postgres" if DATABASE_URL.startswith("postgresql://") else os.getenv("DB_ADAPTER", "sqlite").lower()
+DB_ADAPTER = _DB_FROM_ENV.lower()
 SUPABASE_URL = os.getenv("SUPABASE_URL", "")
 SUPABASE_ANON_KEY = os.getenv("SUPABASE_ANON_KEY", "")
 

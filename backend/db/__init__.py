@@ -11,6 +11,9 @@ class DatabaseAdapter(ABC):
     def get_user_by_account(self, account_no: str) -> Optional[Dict[str, Any]]: ...
 
     @abstractmethod
+    def get_user_by_phone(self, phone: str) -> Optional[Dict[str, Any]]: ...
+
+    @abstractmethod
     def get_user_by_id(self, user_id: int) -> Optional[Dict[str, Any]]: ...
 
     @abstractmethod
@@ -96,9 +99,34 @@ _adapter_singleton: Optional[DatabaseAdapter] = None
 def get_adapter() -> DatabaseAdapter:
     global _adapter_singleton
     if _adapter_singleton is None:
-        if config.DB_ADAPTER == "supabase":
-            from .supabase_adapter import SupabaseAdapter
-            _adapter_singleton = SupabaseAdapter()
+        import logging as _lg
+        _logger = _lg.getLogger("db.get_adapter")
+        if not _logger.handlers:
+            _h = _lg.StreamHandler()
+            _h.setFormatter(_lg.Formatter("[%(asctime)s] %(levelname)s | %(message)s", "%Y-%m-%d %H:%M:%S"))
+            _logger.addHandler(_h)
+            _logger.setLevel(_lg.INFO)
+        if config.DB_ADAPTER == "d1":
+            from .d1_adapter import D1Adapter
+            _adapter_singleton = D1Adapter()
+        elif config.DB_ADAPTER == "supabase":
+            try:
+                from .supabase_adapter import SupabaseAdapter
+                _adapter_singleton = SupabaseAdapter()
+            except ImportError as e:
+                # Supabase 的底层数据库就是 PostgreSQL，直接 fallback 到 PostgresAdapter
+                # （避免误设 DB_ADAPTER=supabase 时因缺 supabase_adapter.py 直接崩溃）
+                _logger.warning(
+                    "[DB_ADAPTER=supabase] 未找到 supabase_adapter.py（%s）→ "
+                    "已自动 fallback 到 PostgresAdapter（Supabase 底层=PostgreSQL，完全兼容）。"
+                    "推荐将 DB_ADAPTER 改为 'postgres' 以避免此告警。",
+                    str(e).strip() or str(type(e)),
+                )
+                from .postgres_adapter import PostgresAdapter
+                _adapter_singleton = PostgresAdapter()
+        elif config.DB_ADAPTER in ("postgres", "postgresql"):
+            from .postgres_adapter import PostgresAdapter
+            _adapter_singleton = PostgresAdapter()
         else:
             from .sqlite_adapter import SQLiteAdapter
             _adapter_singleton = SQLiteAdapter()

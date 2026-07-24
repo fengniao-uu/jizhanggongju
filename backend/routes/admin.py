@@ -210,7 +210,7 @@ def admin_delete_user(user_id: int):
     if rows <= 0:
         return jsonify({"code": 404, "msg": "目标用户不存在或已注销", "data": None}), 404
     _admin_audit_log("delete_user", f"target_uid={user_id}")
-    return jsonify({"code": 0, "msg": f"用户 #{user_id} 已注销（软删，可在 DB 恢复）", "data": {"target_user_id": user_id}})
+    return jsonify({"code": 0, "msg": f"用户 #{user_id} 已删除（硬删，不可恢复）", "data": {"target_user_id": user_id}})
 
 
 # ============== 7. 单个用户详情（管理员查看任意用户资料） ==============

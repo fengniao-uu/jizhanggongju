@@ -26,25 +26,31 @@ def _normalize_type(t) -> Optional[str]:
 
 
 def seed_default_admin_if_needed() -> int:
-    """当 DISABLE_DEFAULT_ADMIN=0 时，若无任何管理员则创建默认管理员。"""
+    """当 DISABLE_DEFAULT_ADMIN=0 时，若无任何管理员则创建默认管理员（幂等）。"""
+    import sqlite3 as _sq3
     if bool(getattr(config, "DISABLE_DEFAULT_ADMIN", False)):
         return 0
     adapter = get_adapter()
     admin_role = int(getattr(config, "ROLE_ADMIN", 1))
     admin_acc = str(getattr(config, "ADMIN_DEFAULT_ACCOUNT", "100000") or "100000").strip()[:6]
-    admin_pwd = str(getattr(config, "ADMIN_DEFAULT_PASSWORD", "123456") or "123456").strip()[:6]
+    admin_pwd = str(getattr(config, "ADMIN_DEFAULT_PASSWORD", "123456") or "123456").strip()[:12]
     existing = adapter.get_user_by_account(admin_acc)
     if existing:
         return int(existing["id"])
-    user_id = adapter.create_user(admin_acc, _hash_pwd(admin_pwd), role=admin_role,
-                                  nickname="超级管理员")
-    adapter.upsert_system_categories_for_user(user_id)
-    adapter.update_user_last_login(user_id)
-    return int(user_id)
+    try:
+        user_id = adapter.create_user(admin_acc, _hash_pwd(admin_pwd), role=admin_role,
+                                      nickname="超级管理员")
+        adapter.upsert_system_categories_for_user(user_id)
+        adapter.update_user_last_login(user_id)
+        return int(user_id)
+    except _sq3.IntegrityError:
+        fallback = adapter.get_user_by_account(admin_acc)
+        return int(fallback["id"]) if fallback else 0
 
 
 def seed_demo_user_if_needed() -> int:
-    """当 DISABLE_DEMO_USER=1（生产建议）时不自动创建 Demo 账号。"""
+    """当 DISABLE_DEMO_USER=1（生产建议）时不自动创建 Demo 账号（幂等）。"""
+    import sqlite3 as _sq3
     if bool(getattr(config, "DISABLE_DEMO_USER", False)):
         return 0
     adapter = get_adapter()
@@ -53,7 +59,12 @@ def seed_demo_user_if_needed() -> int:
     u = adapter.get_user_by_account(account)
     if u:
         return int(u["id"])
-    user_id = adapter.create_user(account, _hash_pwd(pwd))
+    user_id = None
+    try:
+        user_id = adapter.create_user(account, _hash_pwd(pwd))
+    except _sq3.IntegrityError:
+        fallback = adapter.get_user_by_account(account)
+        return int(fallback["id"]) if fallback else 0
     adapter.upsert_system_categories_for_user(user_id)
     adapter.update_user_last_login(user_id)
 

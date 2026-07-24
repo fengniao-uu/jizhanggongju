@@ -5,6 +5,7 @@ from typing import Optional
 _6DIGIT = re.compile(r"^\d{6}$")
 _6TO12DIGIT = re.compile(r"^\d{6,12}$")
 _YYYYMMDD = re.compile(r"^\d{4}-\d{2}-\d{2}$")
+_PHONE = re.compile(r"^1[3-9]\d{9}$")
 
 
 def is_6digit(s) -> bool:
@@ -18,6 +19,13 @@ def is_valid_password(s) -> bool:
     if s is None:
         return False
     return bool(_6TO12DIGIT.fullmatch(str(s)))
+
+
+def is_phone(s) -> bool:
+    """检查是否为中国大陆手机号（11位，1开头，第二位3-9）"""
+    if s is None:
+        return False
+    return bool(_PHONE.fullmatch(str(s)))
 
 
 def is_amount_positive(s) -> bool:

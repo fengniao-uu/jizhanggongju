@@ -187,7 +187,7 @@ class SQLiteAdapter(DatabaseAdapter):
         """
         import config
         admin_acc = str(getattr(config, "ADMIN_DEFAULT_ACCOUNT", "100000") or "100000").strip()[:6]
-        admin_pwd = str(getattr(config, "ADMIN_DEFAULT_PASSWORD", "123456") or "123456").strip()[:6]
+        admin_pwd = str(getattr(config, "ADMIN_DEFAULT_PASSWORD", "123456") or "123456").strip()[:12]
         admin_role = int(getattr(config, "ROLE_ADMIN", 1))
         disable_default = bool(getattr(config, "DISABLE_DEFAULT_ADMIN", False))
         with self._conn() as c:
@@ -210,9 +210,8 @@ class SQLiteAdapter(DatabaseAdapter):
                 return 0
             import re
             from werkzeug.security import generate_password_hash
-            if not re.fullmatch(r"\d{6}", admin_acc) or not re.fullmatch(r"\d{6}", admin_pwd):
+            if not re.fullmatch(r"\d{6}", admin_acc):
                 admin_acc = "100000"
-                admin_pwd = "123456"
             u = c.execute(
                 "SELECT id, role FROM users WHERE account_no = ? AND is_deleted = 0 LIMIT 1",
                 (admin_acc,),
@@ -259,6 +258,14 @@ class SQLiteAdapter(DatabaseAdapter):
             cur = c.execute(
                 "SELECT * FROM users WHERE account_no = ? AND is_deleted = 0 LIMIT 1",
                 (account_no,),
+            )
+            return _row_to_dict(cur, cur.fetchone())
+
+    def get_user_by_phone(self, phone: str) -> Optional[Dict[str, Any]]:
+        with self._conn() as c:
+            cur = c.execute(
+                "SELECT * FROM users WHERE phone = ? AND is_deleted = 0 LIMIT 1",
+                (phone,),
             )
             return _row_to_dict(cur, cur.fetchone())
 
@@ -459,7 +466,7 @@ class SQLiteAdapter(DatabaseAdapter):
             return rows
 
     def admin_soft_delete(self, target_user_id: int, *, operator_uid: int = 0) -> int:
-        """管理员软删（is_deleted=1）；禁止删除自己；禁止删除最后一名超级管理员；返回 UPDATE 行数或负数"""
+        """管理员硬删（级联删除，不可恢复）；禁止删除自己；禁止删除最后一名超级管理员；返回 DELETE 行数或负数"""
         import config
         role_admin = int(getattr(config, "ROLE_ADMIN", 1))
         if int(target_user_id) <= 0:
@@ -479,11 +486,12 @@ class SQLiteAdapter(DatabaseAdapter):
                 ).fetchone()
                 if int(rest[0] or 0) <= 0:
                     return -3  # 不能删最后一名超级管理员
-            # 顺带清掉其锁定状态（软删标记为主）
-            cur = c.execute(
-                "UPDATE users SET is_deleted = 1, failed_attempts = 0, locked_until = NULL WHERE id = ? AND is_deleted = 0",
-                (int(target_user_id),),
-            )
+            # 级联删除用户及其关联数据（硬删除，不可恢复）
+            c.execute("DELETE FROM transactions WHERE user_id = ?", (int(target_user_id),))
+            c.execute("DELETE FROM reminders WHERE user_id = ?", (int(target_user_id),))
+            c.execute("DELETE FROM categories WHERE user_id = ?", (int(target_user_id),))
+            c.execute("DELETE FROM session_logs WHERE user_id = ?", (int(target_user_id),))
+            cur = c.execute("DELETE FROM users WHERE id = ? AND is_deleted = 0", (int(target_user_id),))
             return int(getattr(cur, "rowcount", 0) or 0)
 
     def admin_list_users(
